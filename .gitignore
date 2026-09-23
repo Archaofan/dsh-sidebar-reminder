@@ -10,6 +10,10 @@ package-lock.json
 # sandbox test rig (see README "开发与沙箱验证")
 .sandbox/
 
+# development notes — internal research, not part of the published package
+*调研*
+*报告*
+
 # packed tarballs
 *.tgz
 
