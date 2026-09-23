@@ -1,0 +1,13 @@
+# dependencies (needed for link installs; restore with: npm install)
+node_modules/
+.pnpm-store/
+
+# sandbox test rig (see README "开发与沙箱验证")
+.sandbox/
+
+# packed tarballs
+*.tgz
+
+# logs
+*.log
+npm-debug.log*

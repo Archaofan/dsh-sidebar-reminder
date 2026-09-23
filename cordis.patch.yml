@@ -1,0 +1,17 @@
+# dsh-session-suspend bundle patch
+#
+# Installed through the official CLI — `dsh plugin --profile <name> add <spec>` —
+# which reconciles `dsh.profile.bundles` against installed packages and, seeing
+# the `dsh.bundle.patch` declaration, appends `dsh-session-suspend` to the bundle
+# stack. The profile boot then merges THIS patch (a single `insert` of the plugin
+# row) — no manual profile file edits needed.
+#
+# Double mounts are handled at runtime instead of here: the host half tolerates
+# an already-registered tool name or route (see registerTool / registerRoute in
+# index.js), so a second mount stands down without failing the boot. A `!!js`
+# `disabled` guard was tried here first and removed — the expression is evaluated
+# lazily, so it can fire *after* the first instance already registered its tools
+# and routes, disposing a working plugin instead of preventing the clash.
+- insert:
+    - id: session-suspend
+      name: dsh-session-suspend
