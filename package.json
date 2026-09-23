@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-suspend",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "DSH web plugin: park a session with a natural-language note, get a highlighted sidebar row and a hover reminder card. 会话挂起提醒：对话里自然语言挂起，侧边栏高亮 + 悬停显示提醒。",
   "type": "module",
   "main": "index.js",

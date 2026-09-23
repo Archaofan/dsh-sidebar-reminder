@@ -79,16 +79,24 @@ DSH 网页版的「会话挂起提醒」插件：在对话里用自然语言描�
 pnpm pack --pack-destination .
 
 # 装进生产 profile
-dsh plugin --profile web add E:\DSH-Workspace\DSH-Plugin\dsh-session-suspend-0.1.0.tgz
+dsh plugin --profile web add E:\DSH-Workspace\DSH-Plugin\dsh-session-suspend-0.1.2.tgz --ignore-scripts
 ```
 
 自包含：装完后即使插件目录被移动/删除也不影响生产；升级时重新打包再 `add` 一次即可。
 依赖随包一起装进 profile 内插件自己的 `node_modules`（与 harness 同版本，互不影响）。
 
+> ⚠️ **Windows 上一定要加 `--ignore-scripts`。** `dsh plugin add` 把自己的参数
+> 原样转给 pnpm，而 pnpm 默认会重跑**整个 profile 里每个包**的安装脚本，不只是新装的这个。
+> 在真实 profile 上实测，不加这个参数会造成三种后果：安装永远跑不完（node-gyp 在重建
+> `ssh2` / `cpu-features`，而机器上没有 Visual Studio）；`cloudflared` 的 postinstall
+> ——它下载的是 **latest**，无视包版本号——会把 `cloudflared.exe` 截断成 0 字节。
+> 加上 `--ignore-scripts` 后同一次安装约 3 秒完成，且除了插件本身什么都不碰。
+> 本插件自己不声明任何安装脚本，所以跳过它们没有任何损失。
+
 ### 方式 B：目录联接（开发迭代用）
 
 ```bash
-dsh plugin --profile web add E:\DSH-Workspace\DSH-Plugin
+dsh plugin --profile web add E:\DSH-Workspace\DSH-Plugin --ignore-scripts
 ```
 
 pnpm 以 `link:` 协议联接目录，改代码重启即生效。**前提是插件目录的 `node_modules` 存在**
@@ -100,8 +108,8 @@ pnpm 以 `link:` 协议联接目录，改代码重启即生效。**前提是插�
 ### 发布后
 
 ```bash
-dsh plugin --profile web add dsh-session-suspend
-dsh plugin --profile web add github:Archaofan/dsh-sidebar-reminder
+dsh plugin --profile web add dsh-session-suspend --ignore-scripts
+dsh plugin --profile web add github:Archaofan/dsh-sidebar-reminder --ignore-scripts
 ```
 
 安装后**重启 DSH**（插件在启动时加载，之后创建的会话都会带上工具）。
@@ -192,7 +200,7 @@ node --check index.js && node --check client.js
 $env:DSH_HOME = 'E:\DSH-Workspace\DSH-Plugin\.sandbox\home'
 & .sandbox\node_modules\.bin\pnpm.cmd pack --pack-destination .sandbox
 node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox remove dsh-session-suspend
-node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add .sandbox\dsh-session-suspend-0.1.0.tgz
+node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add .sandbox\dsh-session-suspend-0.1.2.tgz --ignore-scripts
 
 # 2. 引导沙箱（独立端口 12991、仅回环、独立 home，绝不碰生产）
 node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js --profile sandbox --no-open --port 12991 --host 127.0.0.1
@@ -224,13 +232,24 @@ curl -X POST http://127.0.0.1:12991/session-suspend/set -H "content-type: applic
 
 - [x] 把 `package.json` 里 `repository.url` 的占位符换成真实仓库地址
       —— 已填 `https://github.com/Archaofan/dsh-sidebar-reminder`。
-- [ ] 发布后，在**沙箱 profile** 上先验证「发布后」那条安装路径
-      （`dsh plugin --profile web add github:Archaofan/dsh-sidebar-reminder`），
-      确认没问题再动生产。
-- [ ] 升 `version` 并重新打包；tarball 文件名带版本号。
+- [x] 发布后，在**沙箱 profile** 上先验证「发布后」那条安装路径
+      （`dsh plugin --profile web add github:Archaofan/dsh-sidebar-reminder
+      --ignore-scripts`），确认没问题再动生产。
+- [x] 升 `version` 并重新打包；tarball 文件名带版本号。
+- [x] 用 `--ignore-scripts` 装进生产（见方式 A 的警告）；已在 profile `web` 上验证，
+      7 个文件与发布 tarball 逐字节一致，未碰其他任何包。
 - [ ] 在普通终端里再把交互 UI 完整过一遍：两种界面语言各挂起一次、切换悬停框位置、
       改一个预设名，并确认 `打开` 在官方卡片宽限内点得到。
 - [ ] 确认生产 profile 未被改动：在你决定安装之前，插件不应该出现在生产里。
+
+### 老 profile 上的 pnpm 版本错配
+
+如果在一个**已经有插件**的 profile 上 `dsh plugin add` 报
+`ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF` 或 `ERR_PNPM_UNEXPECTED_STORE`，
+说明该 profile 的 `node_modules` 是用**另一个 pnpm 大版本**建的。看
+`node_modules\.modules.yaml` 里的 `packageManager` 字段。DSH 0.1.6-alpha.2 自带
+pnpm 10，而 pnpm 10 拒绝修改 pnpm 8 建的 store（反过来也一样）。要么先统一 pnpm
+版本，要么把插件装到一个新建的 profile——硬混会在依赖树里留下半联接状态。
 
 ## 卸载
 

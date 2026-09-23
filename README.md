@@ -101,7 +101,7 @@ not touch the profile's dependency tree.
 pnpm pack --pack-destination .
 
 # install into the production profile
-dsh plugin --profile web add dsh-session-suspend-0.1.0.tgz
+dsh plugin --profile web add dsh-session-suspend-0.1.2.tgz --ignore-scripts
 ```
 
 Self-contained: once installed, moving or deleting the plugin directory does not
@@ -109,10 +109,21 @@ affect production. To upgrade, repack and `add` again. Dependencies are
 installed into the plugin's own `node_modules` inside the profile, at the same
 version as the harness.
 
+> ⚠️ **Always pass `--ignore-scripts` on Windows.** `dsh plugin add` forwards its
+> arguments verbatim to pnpm, and pnpm by default re-runs the install scripts of
+> **every package in the profile**, not just the one being added. Measured on a
+> real profile this caused three separate failures: the install never finished
+> (node-gyp rebuilding `ssh2` / `cpu-features`, no Visual Studio on the machine),
+> and `cloudflared`'s postinstall — which downloads the **latest** release
+> regardless of the pinned version — truncated `cloudflared.exe` to 0 bytes. With
+> `--ignore-scripts` the same install finishes in about 3 seconds and touches
+> nothing but the plugin. This plugin itself declares no install scripts, so
+> nothing is lost by skipping them.
+
 ### B. Directory link (for iterating)
 
 ```bash
-dsh plugin --profile web add /path/to/dsh-session-suspend
+dsh plugin --profile web add /path/to/dsh-session-suspend --ignore-scripts
 ```
 
 pnpm links the directory with the `link:` protocol; restart to pick up changes.
@@ -126,8 +137,8 @@ directory to restore it. Use method A for production.
 ### After publishing
 
 ```bash
-dsh plugin --profile web add dsh-session-suspend
-dsh plugin --profile web add github:Archaofan/dsh-sidebar-reminder
+dsh plugin --profile web add dsh-session-suspend --ignore-scripts
+dsh plugin --profile web add github:Archaofan/dsh-sidebar-reminder --ignore-scripts
 ```
 
 **Restart DSH** after installing (plugins load at startup; every session created
@@ -251,7 +262,7 @@ node --check index.js && node --check client.js
 $env:DSH_HOME = 'E:\DSH-Workspace\DSH-Plugin\.sandbox\home'
 & .sandbox\node_modules\.bin\pnpm.cmd pack --pack-destination .sandbox
 node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox remove dsh-session-suspend
-node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add .sandbox\dsh-session-suspend-0.1.0.tgz
+node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add .sandbox\dsh-session-suspend-0.1.2.tgz --ignore-scripts
 
 # 2. boot the sandbox (isolated port 12991, loopback only, isolated home — never touches production)
 node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js --profile sandbox --no-open --port 12991 --host 127.0.0.1
@@ -420,15 +431,28 @@ Before publishing the first release:
 - [x] Replace the `repository.url` placeholder in `package.json` with the real
       repository address — now `https://github.com/Archaofan/dsh-sidebar-reminder`.
 - [ ] After publishing, verify the "after publishing" install path above
-      (`dsh plugin --profile web add github:Archaofan/dsh-sidebar-reminder`) on the
-      **sandbox profile** before touching production.
-- [ ] Bump `version` and re-pack for the next release; the tarball name carries
+      (`dsh plugin --profile web add github:Archaofan/dsh-sidebar-reminder
+      --ignore-scripts`) on the **sandbox profile** before touching production.
+- [x] Bump `version` and re-pack for the next release; the tarball name carries
       the version.
+- [x] Install into production with `--ignore-scripts` (see the warning under
+      method A); verified on profile `web`, all seven files byte-identical to the
+      release tarball, no other package touched.
 - [ ] Confirm the interactive UI once more in a normal terminal: park a session
       in both UI languages, switch the tooltip position, rename a preset, and
       check that `Open` is reachable within the official card's grace period.
 - [ ] Confirm the production profile is untouched: the plugin must be absent
       until you decide to install it.
+
+### pnpm version skew on an existing profile
+
+If `dsh plugin add` on a profile that already has plugins fails with
+`ERR_PNPM_VIRTUAL_STORE_DIR_MAX_LENGTH_DIFF` or `ERR_PNPM_UNEXPECTED_STORE`, the
+profile's `node_modules` was created by a **different pnpm major** than the one
+bundled with this DSH. Check `node_modules\.modules.yaml` → `packageManager`.
+DSH 0.1.6-alpha.2 bundles pnpm 10, and pnpm 10 refuses to touch a pnpm 8 store
+(and vice versa). Either align the pnpm versions first, or install the plugin
+into a fresh profile — mixing the two leaves the tree in a half-linked state.
 
 ## Uninstall
 
