@@ -331,6 +331,54 @@ waiting; the open delay drifting from 500; the close grace drifting from 200) an
 one host variant (`suspend_session` returning an undeclared `presetId`). All must
 be rejected (exit 1) while both good builds pass (exit 0).
 
+`e2e/client.mjs` is the last mile: it drives the **real GUI** in a real browser
+(Playwright), where the slot registry, React rendering and the official
+`HoverCard` are all genuine. It boots the token URL DSH prints, then checks that
+the plugin's footer button renders, that no "did not activate" error appears, that
+parked rows really carry the highlight attribute, and — the part no fake DOM can
+check — that hovering a row puts our card **below-left of the official card with
+no overlap**, that it **does not move after being drawn**, that its action buttons
+sit inside its own box, that it never hangs over the sidebar band, and that
+switching the placement actually moves it and persists to the host:
+
+```bash
+pnpm install                      # once, for the playwright devDependency
+pnpm run e2e http://127.0.0.1:12996/?token=...   # from the sandbox boot log
+# E2E_CHROMIUM=/path/to/chrome.exe pnpm run e2e <url>   # any recent Chromium
+# E2E_SHOTS=<dir> pnpm run e2e <url>                    # also write screenshots
+```
+
+It needs a running DSH with the plugin installed, at least one session **with a
+title**, and one parked note (use the `suspend_session` tool, or `POST
+/session-suspend/set`). A session still called "新会话" / "New session" has no
+title to match on, so its row stays unpainted — that is the documented
+limitation, not a failure.
+
+### Are the tools visible to the model?
+
+Registering a tool only puts it in `ctx.tools`; what the model actually receives
+is what `ctx.tools.schemas()` projects. To prove that half in a genuine boot, a
+throwaway diagnostic plugin was installed into the sandbox alongside this one,
+dumped the real registry after the tree settled, and was then removed. From that
+boot:
+
+```
+ctx.tools.constructor.name        ToolRuntime
+ctx.tools.schemas()               ["suspend_session", "resume_session", "list_suspended"]
+ctx.tools.wireSchemas().schemas   ["suspend_session", "resume_session", "list_suspended"]
+```
+
+with all three descriptions present verbatim, bilingual trigger examples
+included. Two things worth knowing if you repeat it: an effect that reads the
+registry **synchronously at activation sees an empty view** — the tools are
+registered by a sibling plugin's effect, so read it after a delay; and built-in
+tools (`run_code`, `bash`, …) do not appear in the global view at all, they are
+agent-scoped, so an empty global list is not by itself evidence of a problem.
+
+What this does **not** prove is that a model chooses to call the tool for a given
+phrasing — that needs a credentialed model round-trip and is the one check left
+to a human.
+
 > Pitfall 1 — `inject` listed a service this plugin's fiber cannot reach
 > (`uiWorkspace` is provided by `dsh-client-ui-workspace`'s own fiber, a sibling
 > rather than an ancestor). cordis waits for it forever, so the plugin never

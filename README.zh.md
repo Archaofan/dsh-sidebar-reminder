@@ -286,6 +286,45 @@ false` 时未声明即违规，见下面踩过的坑四）。
 200），host 一个坏版本（`suspend_session` 返回未声明的 `presetId`），确认全部被拒
 （exit 1），同时两个好版本通过（exit 0）。
 
+`e2e/client.mjs` 是最后一公里：用 Playwright 驱动**真实 GUI**，插槽注册表、React
+渲染、官方 `HoverCard` 全部是真的。它打开引导日志里打印的 token URL，然后检查
+插件的页脚按钮渲染出来了、没有 "did not activate" 报错、挂起的行真的带上了高亮
+属性，以及——假 DOM 无论如何测不到的那部分——悬停一行时我们的卡片**位于官方卡片
+左下且不重叠**、**画定之后不再移动**、操作按钮在卡片自己的边框内、且**不横跨在
+侧边栏上方**，还有切换定位方式后卡片真的会动并写回 host：
+
+```bash
+pnpm install                      # 装一次，拿 playwright 开发依赖
+pnpm run e2e http://127.0.0.1:12996/?token=...   # 用沙箱引导日志里的地址
+# E2E_CHROMIUM=/path/to/chrome.exe pnpm run e2e <url>   # 任意较新的 Chromium 都行
+# E2E_SHOTS=<dir> pnpm run e2e <url>                    # 顺带存截图
+```
+
+它需要一个已装好插件并在运行中的 DSH、至少一个**有标题的**会话、以及一条挂起的
+备注（用 `suspend_session` 工具，或 `POST /session-suspend/set`）。还叫「新会话 /
+New session」的会话没有可匹配的标题，它的行不会被画上高亮——这是上面写明的已知
+限制，不是失败。
+
+### 工具对模型是否可见
+
+注册一个工具只是把它放进 `ctx.tools`；模型真正收到的是 `ctx.tools.schemas()`
+投影出来的东西。为在真实启动里证明这半边，曾往沙箱里临时装了一个一次性诊断插件，
+在本插件旁边把真实注册表在插件树稳定后 dump 出来，随后移除。那次启动的结果：
+
+```
+ctx.tools.constructor.name        ToolRuntime
+ctx.tools.schemas()               ["suspend_session", "resume_session", "list_suspended"]
+ctx.tools.wireSchemas().schemas   ["suspend_session", "resume_session", "list_suspended"]
+```
+
+三条描述逐字在内，中英文触发示例都包含。复现时有两件事值得注意：在激活时**同步**
+读注册表会读到空视图——工具是由兄弟插件的 effect 注册的，要延后一点再读；内置
+工具（`run_code`、`bash` 等）在全局视图里根本不出现，它们是按 agent 作用域的，
+所以全局列表为空本身并不能说明有问题。
+
+这**不能**证明的是：模型在听到某句话时会不会真的去调用工具——那需要一次带凭据的
+模型往返，也是唯一留给人工的检查项。
+
 > 踩过的坑一：`inject` 里列了本插件 fiber 不可达的服务（`uiWorkspace` 是由
 > `dsh-client-ui-workspace` 自己的 fiber 提供的，和本插件是兄弟而非父子关系），
 > cordis 会一直等它，插件于是永不激活（GUI 报 "1 entry did not activate"）。

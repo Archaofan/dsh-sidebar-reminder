@@ -2,11 +2,19 @@
 node_modules/
 .pnpm-store/
 
+# this package is a plugin LIBRARY, not an app: ship the peerDependencies
+# ranges, never a lockfile that pins DSH's own internals
+pnpm-lock.yaml
+package-lock.json
+
 # sandbox test rig (see README "开发与沙箱验证")
 .sandbox/
 
 # packed tarballs
 *.tgz
+
+# e2e screenshots (regenerate with E2E_SHOTS=<dir>)
+e2e/shots/
 
 # logs
 *.log
