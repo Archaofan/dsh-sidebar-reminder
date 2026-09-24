@@ -19,6 +19,8 @@ Single-purpose, no runtime dependencies, no build step — two source files
 | Sidebar collapsed | A dot on the expand button, meaning something is parked |
 | Session page header | `📌 Park note` button to write / edit / clear the current session's note by hand |
 | Hovering any session row | A pin button next to the official `…`, to write a note for **that** session |
+| **Folded workspace** | A count on the right of the workspace row while it is folded, telling you how many sessions inside it are parked. It disappears when you expand — the sessions are in front of you, so the number would be redundant |
+| Parked list | Every row is rendered with **its own** style preset, exactly like the sidebar; the parked time sits in a subtle filled chip instead of blending into the background |
 
 > The hover card deliberately sits **below** the row: DSH itself draws a session
 > status card to the right of the row (`left = row right + 8`, 244px wide,
@@ -28,6 +30,9 @@ Single-purpose, no runtime dependencies, no build step — two source files
 >
 > The position is configurable — right of the official card, or below-left of it
 > — and it never slides after being drawn (see *Tooltip placement* below).
+>
+> The last two rows above, plus the master switch in *Style settings*, are all
+> on by default and can each be turned off there.
 
 ## Style presets
 
@@ -42,6 +47,29 @@ Sidebar footer → gear → **Style settings**:
   you rename one, your name wins.
 - A natural-language park can also name one: `suspend_session` takes a
   `preset_id` argument (`list_suspended` lists the available ids).
+- **Count on folded workspaces** (on by default): shows how many sessions in a
+  workspace are parked, on the workspace row, only while it is folded. The badge
+  is *removed from the DOM* on expand rather than hidden with CSS, so the row's
+  hover and click geometry stays honest.
+- **Style presets in the list** (on by default): every parked-list row also
+  carries that session's preset. Off, the list degrades to plain text and every
+  row looks the same.
+- **Time chip** (on by default): wraps the parked time in a subtle filled chip
+  (8px radius). Off, it is plain text.
+
+### Where the folded-workspace count comes from
+
+There is a real trap here worth recording. DSH's workspace grouping — the UI
+calls it 工作区 — renders **no session rows at all while it is folded**
+(`deriveGroups` maps `sessions: expanded ? … : []`). So the DOM contains zero
+members when folded, and the count simply cannot be derived from it.
+
+The plugin goes the other way: it takes the workspace membership from the global
+`useWorkspaces` hook and intersects it with the parked notes, then stamps the
+already-computed number onto the folded row. The workspace row itself carries no
+id, so the row-to-workspace correspondence also comes from its React fiber's
+`group`, not from the DOM.
+
 
 ### Theme adaptation
 

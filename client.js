@@ -45,6 +45,28 @@ window.__ModuleLoader__.load({
      * leaves headroom while still excluding trees in the main content area.
      */
     const SIDEBAR_MAX_LEFT = 360
+    /**
+     * Attribute + class for the collapsed-group count badge.
+     *
+     * The official grouping entity is a *Workspace* (the UI says 工作区);
+     * `ProjectRowItem` / `YDXeBa_projectRow` are legacy names only. A group row
+     * is `div[role="treeitem"][aria-expanded]`, and — critically — its session
+     * rows are not rendered at all while it is folded (deriveGroups maps
+     * `sessions: expanded ? … : []`), so the count cannot be read off the DOM.
+     * It is computed from the Workspace Controller snapshot instead, which the
+     * footer slot already receives as the global `useWorkspaces` prop.
+     */
+    const PROJECT_ATTR = 'data-dsh-suspend-project'
+    const PROJECT_COUNT_CLASS = 'dsh-suspend-project-count'
+
+    /**
+     * Workspace membership, refreshed by the footer slot's `useWorkspaces`
+     * hook. Each entry is `{ key, sessionIds }` where `key` is the group key
+     * the row's fiber carries (workspaceId, or '' for the ungrouped bucket).
+     */
+    let workspaceMembers = []
+    /** Session ids the live list knows about; empty means "unknown, trust all". */
+    let knownSessionIds = new Set()
 
     /* ---------------------------------------------------------------- *
      * Highlight presets: the vocabulary shared with the host half.
@@ -91,13 +113,26 @@ window.__ModuleLoader__.load({
     const TIP_WAIT_FRAMES = 6
 
     function EMPTY_PRESETS() {
-      return { askOnPark: true, defaultPresetId: '', tipPlacement: 'below', tipPlacements: TIP_PLACEMENTS, styles: STYLE_IDS, presets: [] }
+      return {
+        askOnPark: true,
+        defaultPresetId: '',
+        tipPlacement: 'below',
+        tipPlacements: TIP_PLACEMENTS,
+        styles: STYLE_IDS,
+        projectBadge: true,
+        panelStyles: true,
+        timeChip: true,
+        presets: [],
+      }
     }
 
     function samePresets(left, right) {
       if (left.askOnPark !== right.askOnPark) return false
       if (left.defaultPresetId !== right.defaultPresetId) return false
       if (left.tipPlacement !== right.tipPlacement) return false
+      if (!!left.projectBadge !== !!right.projectBadge) return false
+      if (!!left.panelStyles !== !!right.panelStyles) return false
+      if (!!left.timeChip !== !!right.timeChip) return false
       if (left.presets.length !== right.presets.length) return false
       return left.presets.every((p, index) => {
         const q = right.presets[index]
@@ -145,6 +180,13 @@ window.__ModuleLoader__.load({
       tipPlacement: '悬停框位置',
       tipPlacementHint: '官方悬停卡片右侧：并排显示，不随官方卡片高度变化。左下：紧贴官方卡片下方，离侧边栏更近、按钮更好点。',
       tipPlacements: { right: '官方卡片右侧', below: '官方卡片左下' },
+      projectBadge: '折叠项目显示挂起数',
+      projectBadgeHint: '打开后，侧边栏里折叠起来的项目会在行尾显示其下有多少个会话被挂起；展开时隐藏（展开状态下子项本就可见，计数是冗余的）。',
+      panelStyles: '总览中按预设样式区分',
+      panelStylesHint: '打开后，「挂起的会话」列表里每一行都带自己预设的视觉样式（色条 / 底色 / 圆点等），和侧边栏一致；关闭则所有行同一个样子。',
+      timeChip: '时间加上底色框',
+      timeChipHint: '打开后，列表里的挂起时间带一个浅色小框，不再和背景糊在一起；关闭则为纯文字。',
+      sessionsParkedSuffix: '个会话已挂起',
       preset: '样式',
       presetName: '预设名称',
       presetStyle: '样式',
@@ -197,6 +239,13 @@ window.__ModuleLoader__.load({
       tipPlacement: 'Note card position',
       tipPlacementHint: 'Right of the official card: side by side, independent of its height. Below-left: tucked under the official card, closer to the sidebar and easier to click.',
       tipPlacements: { right: 'Right of official card', below: 'Below-left of official card' },
+      projectBadge: 'Show parked count on collapsed projects',
+      projectBadgeHint: 'On: a collapsed project row shows how many of its sessions are parked. Hidden while expanded — the children are visible then, so the count is redundant.',
+      panelStyles: 'Differentiate presets in the overview',
+      panelStylesHint: 'On: every row of the parked list carries its own preset look (bar / tint / dot …), matching the sidebar. Off: all rows look the same.',
+      timeChip: 'Put the timestamp in a chip',
+      timeChipHint: 'On: the parked time gets a subtle filled chip so it stops blending into the background. Off: plain text.',
+      sessionsParkedSuffix: 'sessions parked',
       preset: 'Style',
       presetName: 'Preset name',
       presetStyle: 'Style',
@@ -258,7 +307,6 @@ window.__ModuleLoader__.load({
          corners match DSH's global superellipse. */
       '.dsh-suspend-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:17px;padding:0 6px;border-radius:999px;corner-shape:round;background:var(--dsw-alias-state-warn-primary,#f59e0b);color:var(--dsw-static-neutral-1000,#000);font-size:11px;font-weight:600;font-variant-numeric:tabular-nums;line-height:17px;white-space:nowrap}',
       '.dsh-suspend-rail-dot{position:absolute;top:2px;right:2px;width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-state-warn-primary,#f59e0b)}',
-      '.dsh-suspend-rail-badge{position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-state-warn-primary,#f59e0b);box-shadow:0 0 0 2px var(--dsw-specific-sidebar-fill,#f9fafb)}',
       '.dsh-suspend-row{--dsh-suspend-c:var(--dsw-alias-state-warn-primary,#f59e0b);--dsh-suspend-a:1}',
       /* Seven preset styles. Each reads the per-row custom properties set by the
          DOM highlighter (--dsh-suspend-c = colour, --dsh-suspend-a = strength),
@@ -327,6 +375,38 @@ window.__ModuleLoader__.load({
       '.dsh-suspend-panel-row-foot{display:flex;align-items:center;justify-content:space-between;margin-top:2px}',
       '.dsh-suspend-panel-row-time{color:var(--dsw-alias-label-tertiary,#81858c);font-size:11px}',
       '.dsh-suspend-panel-row-actions{display:flex;gap:6px}',
+      /* Panel rows carry the preset's signature, so a preset is recognisable in
+         the overview without cross-referencing the sidebar. The seven rules
+         mirror the sidebar ones exactly; only the scope differs. The row keeps
+         `position:relative` unconditionally so the dot's containing block does
+         not change when a style is applied or removed. */
+      '.dsh-suspend-panel-row{position:relative}',
+      '.dsh-suspend-panel-row.dsh-suspend-s-bar{box-shadow:inset 3px 0 0 0 var(--dsh-suspend-c)}',
+      '.dsh-suspend-panel-row.dsh-suspend-s-bar-wide{box-shadow:inset 6px 0 0 0 var(--dsh-suspend-c)}',
+      '.dsh-suspend-panel-row.dsh-suspend-s-tint{background:color-mix(in srgb, var(--dsh-suspend-c) calc(var(--dsh-suspend-a) * 100%), transparent)}',
+      '.dsh-suspend-panel-row.dsh-suspend-s-dot::before{content:"";position:absolute;left:6px;top:14px;width:6px;height:6px;border-radius:50%;background:var(--dsh-suspend-c);opacity:var(--dsh-suspend-a)}',
+      '.dsh-suspend-panel-row.dsh-suspend-s-dot{padding-left:18px}',
+      '.dsh-suspend-panel-row.dsh-suspend-s-text .dsh-suspend-panel-row-title{color:var(--dsh-suspend-c)}',
+      '.dsh-suspend-panel-row.dsh-suspend-s-line{box-shadow:inset 0 -1px 0 0 var(--dsh-suspend-c)}',
+      '.dsh-suspend-panel-row.dsh-suspend-s-glow{box-shadow:0 0 0 1px color-mix(in srgb, var(--dsh-suspend-c) calc(var(--dsh-suspend-a) * 100%), transparent),0 0 8px 0 color-mix(in srgb, var(--dsh-suspend-c) calc(var(--dsh-suspend-a) * 60%), transparent)}',
+      /* The parked-time stamp, as a chip.
+         The bare 11px tertiary label sat at roughly 3.4:1 against the panel
+         surface and had no container, so it read as noise rather than as data.
+         A chip gives it the containment Material specifies for compact
+         metadata — filled container, 1px stroke, 8px radius, tight padding —
+         using DSH's own tokens so it follows both themes. The stroke uses
+         border-l4 (the same hairline DSH uses for input borders) rather than
+         the label colour, which would be far too heavy at 1px. */
+      '.dsh-suspend-time-chip{display:inline-flex;align-items:center;height:18px;padding:0 6px;border:.5px solid var(--dsw-alias-border-l4,#00000029);border-radius:8px;corner-shape:round;background:var(--dsw-alias-interactive-bg-hover,#2631480f);color:var(--dsw-alias-label-secondary,#61666b);font-size:11px;font-variant-numeric:tabular-nums;line-height:16px;white-space:nowrap}',
+      /* Collapsed-group count badge.
+         Quiet on purpose: the amber chip is reserved for the parked session
+         rows themselves, so an aggregate on a folder row must not compete with
+         them. Secondary label on the interactive tint clears ~4.6:1 in both
+         themes, and tabular-nums keeps the width from twitching as the count
+         changes. `flex:none` because the official row is a flex container
+         whose title span is flex:1 — appending lands the badge on the right
+         edge without disturbing the official layout. */
+      '.dsh-suspend-project-count{display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:16px;height:16px;padding:0 5px;border-radius:999px;corner-shape:round;background:var(--dsw-alias-interactive-bg-hover,#2631480f);color:var(--dsw-alias-label-secondary,#61666b);font-size:10px;font-weight:600;font-variant-numeric:tabular-nums;line-height:16px;white-space:nowrap;pointer-events:none}',
       '.dsh-suspend-btn{min-height:24px;padding:2px 8px;border:0;border-radius:6px;background:var(--dsw-alias-interactive-bg-hover,#2631480f);color:var(--dsw-alias-label-primary,#0f1115);font:inherit;font-size:12px;cursor:pointer}',
       '.dsh-suspend-btn:hover{background:var(--dsw-alias-interactive-bg-hover,#2631480f)}',
       '.dsh-suspend-btn-danger{color:var(--dsw-alias-state-warn-label,#dd8629)}',
@@ -471,6 +551,11 @@ window.__ModuleLoader__.load({
         tipPlacement: TIP_PLACEMENTS.includes(data.tipPlacement) ? data.tipPlacement : 'below',
         tipPlacements: Array.isArray(data.tipPlacements) && data.tipPlacements.length ? data.tipPlacements : TIP_PLACEMENTS,
         styles: Array.isArray(data.styles) && data.styles.length ? data.styles : STYLE_IDS,
+        /* Default-on toggles: `!== false` so a host that predates the key
+           (or an absent field) keeps the feature enabled. */
+        projectBadge: data.projectBadge !== false,
+        panelStyles: data.panelStyles !== false,
+        timeChip: data.timeChip !== false,
         presets,
       }
       if (samePresets(store.presets, next)) return
@@ -484,6 +569,9 @@ window.__ModuleLoader__.load({
         askOnPark: next.askOnPark === true,
         defaultPresetId: next.defaultPresetId,
         tipPlacement: next.tipPlacement,
+        projectBadge: next.projectBadge !== false,
+        panelStyles: next.panelStyles !== false,
+        timeChip: next.timeChip !== false,
         presets: next.presets.map((p) => ({
           id: p.id,
           name: p.name,
@@ -507,6 +595,9 @@ window.__ModuleLoader__.load({
           tipPlacement: TIP_PLACEMENTS.includes(data.tipPlacement) ? data.tipPlacement : 'below',
           tipPlacements: Array.isArray(data.tipPlacements) && data.tipPlacements.length ? data.tipPlacements : TIP_PLACEMENTS,
           styles: Array.isArray(data.styles) && data.styles.length ? data.styles : STYLE_IDS,
+          projectBadge: data.projectBadge !== false,
+          panelStyles: data.panelStyles !== false,
+          timeChip: data.timeChip !== false,
           presets: (data.presets || []).map(normalizePreset).filter(Boolean),
         }
         emitChange()
@@ -604,6 +695,117 @@ window.__ModuleLoader__.load({
       return rect.width > 0 && rect.height > 0 && rect.left < SIDEBAR_MAX_LEFT
     }
 
+    /**
+     * Is this tree row a Workspace group header rather than a session?
+     *
+     * Session rows carry `aria-selected`; group rows carry `aria-expanded`.
+     * Neither has an id or data-*, so the attribute is the only DOM signal.
+     * Search results are `<button>`s, hence the tag check.
+     */
+    function isProjectRow(row) {
+      return row.tagName === 'DIV' && row.hasAttribute('aria-expanded') && !row.hasAttribute('aria-selected')
+    }
+
+    /**
+     * The group key a project row represents, read from its React fiber.
+     *
+     * ProjectRowItem receives `group` (a GroupNode) while SessionNodeItem
+     * receives `node`, so probing for `group` cleanly separates the two. The
+     * key matches what `workspaceMembers` is indexed by: a workspaceId, or ''
+     * for the ungrouped bucket. Returns null when the fiber is unreachable.
+     */
+    function projectGroupKey(row) {
+      try {
+        const key = Object.keys(row).find((name) => name.startsWith('__reactFiber$'))
+        let fiber = key ? row[key] : null
+        for (let depth = 0; fiber && depth < 12; depth += 1) {
+          const group = fiber.memoizedProps && fiber.memoizedProps.group
+          if (group && typeof group === 'object') {
+            if (typeof group.key === 'string') return group.key
+            if (typeof group.workspaceId === 'string') return group.workspaceId
+            return ''
+          }
+          fiber = fiber.return
+        }
+      } catch {
+        // React internals are not a contract.
+      }
+      return null
+    }
+
+    /**
+     * Parked-session count per group key.
+     *
+     * Membership comes from the Workspace Controller snapshot, not from the
+     * DOM, precisely because a folded group renders no session rows. The
+     * ungrouped bucket is derived: a parked session that no workspace claims
+     * and that the live list still knows about.
+     */
+    function parkedCountsByGroup() {
+      const counts = new Map()
+      const claimed = new Set()
+      const known = knownSessionIds.size ? knownSessionIds : null
+      for (const group of workspaceMembers) {
+        let total = 0
+        for (const id of group.sessionIds || []) {
+          claimed.add(id)
+          if (store.notes[id] && (!known || known.has(id))) total += 1
+        }
+        if (total > 0) counts.set(group.key, total)
+      }
+      let ungrouped = 0
+      for (const id of Object.keys(store.notes)) {
+        if (claimed.has(id)) continue
+        if (known && !known.has(id)) continue
+        ungrouped += 1
+      }
+      if (ungrouped > 0) counts.set('', ungrouped)
+      return counts
+    }
+
+    /**
+     * Draw (or clear) the count badge on one group row.
+     *
+     * Shown only while the group is FOLDED and it actually has parked
+     * sessions. While expanded the children are visible, so a count is
+     * redundant — the badge is removed from the DOM rather than hidden, which
+     * is what the reference implementation does and keeps the hover/click
+     * geometry of the row honest.
+     */
+    function paintProjectBadge(row, counts) {
+      const existing = row.querySelector(`.${PROJECT_COUNT_CLASS}`)
+      const drop = () => {
+        if (existing && existing.isConnected) existing.remove()
+        row.removeAttribute(PROJECT_ATTR)
+      }
+      if (!counts || row.getAttribute('aria-expanded') === 'true') {
+        drop()
+        return
+      }
+      const groupKey = projectGroupKey(row)
+      if (groupKey === null) {
+        drop()
+        return
+      }
+      const count = counts.get(groupKey) || 0
+      if (count <= 0) {
+        drop()
+        return
+      }
+      let badge = existing
+      if (!badge || !badge.isConnected) {
+        badge = document.createElement('span')
+        badge.className = PROJECT_COUNT_CLASS
+        /* Appended last: the row is a flex container whose title span is
+           flex:1, so anything after it lands on the right edge. */
+        row.appendChild(badge)
+      }
+      const text = String(count)
+      if (badge.textContent !== text) badge.textContent = text
+      badge.title = `${count} ${t.sessionsParkedSuffix}`
+      row.setAttribute(PROJECT_ATTR, groupKey)
+    }
+
     function clearRowPaint(row) {
       row.classList.remove(ROW_CLASS)
       for (const style of STYLE_IDS) row.classList.remove(`dsh-suspend-s-${style}`)
@@ -613,8 +815,18 @@ window.__ModuleLoader__.load({
 
     function syncRows() {
       const byTitle = noteByTitle()
+      /* Computed once per pass, and only when the feature is on. */
+      const counts = store.presets.projectBadge !== false ? parkedCountsByGroup() : null
       for (const row of document.querySelectorAll('[role="treeitem"]')) {
         if (!isSidebarRow(row)) continue
+        /* Group rows are handled here and never fall through to the session
+           logic. This is also what stops a workspace label that happens to
+           equal a parked session's title from stamping the group row: the
+           title lookup below can no longer see project rows at all. */
+        if (isProjectRow(row)) {
+          paintProjectBadge(row, counts)
+          continue
+        }
         let hit
         for (const text of rowTexts(row)) {
           hit = byTitle.get(text)
@@ -637,15 +849,33 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /**
+     * Apply one preset's visual signature to any element.
+     *
+     * Shared by the sidebar row highlighter and the parked-list panel, so a
+     * preset looks the same wherever it appears. The element needs no prior
+     * class: the style class carries the look and the two custom properties
+     * carry the colour and strength, which is why the CSS rules are written
+     * against the class alone rather than against `.dsh-suspend-row`.
+     *
+     * DOM elements only. A React element from createElement() is NOT one — it
+     * has no classList — and the throw that used to escape here took the whole
+     * slot registration down with it, so the guard is deliberate: a wrong
+     * argument costs a missing highlight, never the sidebar.
+     */
+    function applyPresetStyle(el, preset) {
+      if (!el || !preset) return
+      if (!el.classList || typeof el.classList.add !== 'function') return
+      for (const style of STYLE_IDS) el.classList.remove(`dsh-suspend-s-${style}`)
+      el.classList.add(`dsh-suspend-s-${preset.style}`)
+      el.style.setProperty('--dsh-suspend-c', preset.color)
+      el.style.setProperty('--dsh-suspend-a', String(preset.opacity))
+    }
+
     /** Apply one note's preset to its row: a style class plus two custom props. */
     function paintRow(row, hit) {
       row.classList.add(ROW_CLASS)
-      for (const style of STYLE_IDS) row.classList.remove(`dsh-suspend-s-${style}`)
-      const preset = presetFor(hit)
-      if (!preset) return
-      row.classList.add(`dsh-suspend-s-${preset.style}`)
-      row.style.setProperty('--dsh-suspend-c', preset.color)
-      row.style.setProperty('--dsh-suspend-a', String(preset.opacity))
+      applyPresetStyle(row, presetFor(hit))
     }
 
     /* ---------------------------------------------------------------- *
@@ -730,6 +960,8 @@ window.__ModuleLoader__.load({
         clearRowPaint(row)
       }
       for (const button of document.querySelectorAll(`.${PARK_BTN_CLASS}`)) button.remove()
+      for (const badge of document.querySelectorAll(`.${PROJECT_COUNT_CLASS}`)) badge.remove()
+      for (const row of document.querySelectorAll(`[${PROJECT_ATTR}]`)) row.removeAttribute(PROJECT_ATTR)
     }
 
     /* ---------------------------------------------------------------- *
@@ -1154,6 +1386,9 @@ window.__ModuleLoader__.load({
           id: sessionId,
           note: entry.note,
           createdAt: entry.createdAt,
+          /* presetId must survive the trip: the panel resolves a preset from
+             it, and without it every row would read as "no preset". */
+          presetId: entry.presetId,
           title: snapshot.titles[sessionId] || sessionId,
         }))
         .sort((left, right) => (right.createdAt || '').localeCompare(left.createdAt || ''))
@@ -1287,6 +1522,9 @@ window.__ModuleLoader__.load({
           askOnPark: prefs.askOnPark,
           defaultPresetId: prefs.defaultPresetId,
           tipPlacement: prefs.tipPlacement,
+          projectBadge: prefs.projectBadge,
+          panelStyles: prefs.panelStyles,
+          timeChip: prefs.timeChip,
           presets: [...rest, preset].slice(0, 12),
         })
       }
@@ -1298,6 +1536,9 @@ window.__ModuleLoader__.load({
           askOnPark: prefs.askOnPark,
           defaultPresetId: prefs.defaultPresetId === id ? rest[0].id : prefs.defaultPresetId,
           tipPlacement: prefs.tipPlacement,
+          projectBadge: prefs.projectBadge,
+          panelStyles: prefs.panelStyles,
+          timeChip: prefs.timeChip,
           presets: rest,
         })
       }
@@ -1308,6 +1549,9 @@ window.__ModuleLoader__.load({
           askOnPark: prefs.askOnPark,
           defaultPresetId: prefs.defaultPresetId,
           tipPlacement: value,
+          projectBadge: prefs.projectBadge,
+          panelStyles: prefs.panelStyles,
+          timeChip: prefs.timeChip,
           presets: prefs.presets,
         })
       }
@@ -1326,12 +1570,78 @@ window.__ModuleLoader__.load({
                 askOnPark: event.target.checked,
                 defaultPresetId: prefs.defaultPresetId,
                 tipPlacement: prefs.tipPlacement,
+                projectBadge: prefs.projectBadge,
+                panelStyles: prefs.panelStyles,
+                timeChip: prefs.timeChip,
                 presets: prefs.presets,
               }),
           }),
           createElement('span', null, t.askOnPark),
         ),
         createElement('div', { className: 'dsh-suspend-settings-hint' }, t.askOnParkHint),
+        /* Collapsed-project count badge. */
+        createElement(
+          'label',
+          { className: 'dsh-suspend-settings-toggle' },
+          createElement('input', {
+            type: 'checkbox',
+            checked: prefs.projectBadge !== false,
+            onChange: (event) =>
+              commit({
+                askOnPark: prefs.askOnPark,
+                defaultPresetId: prefs.defaultPresetId,
+                tipPlacement: prefs.tipPlacement,
+                projectBadge: event.target.checked,
+                panelStyles: prefs.panelStyles,
+                timeChip: prefs.timeChip,
+                presets: prefs.presets,
+              }),
+          }),
+          createElement('span', null, t.projectBadge),
+        ),
+        createElement('div', { className: 'dsh-suspend-settings-hint' }, t.projectBadgeHint),
+        /* Preset signature inside the parked list. */
+        createElement(
+          'label',
+          { className: 'dsh-suspend-settings-toggle' },
+          createElement('input', {
+            type: 'checkbox',
+            checked: prefs.panelStyles !== false,
+            onChange: (event) =>
+              commit({
+                askOnPark: prefs.askOnPark,
+                defaultPresetId: prefs.defaultPresetId,
+                tipPlacement: prefs.tipPlacement,
+                projectBadge: prefs.projectBadge,
+                panelStyles: event.target.checked,
+                timeChip: prefs.timeChip,
+                presets: prefs.presets,
+              }),
+          }),
+          createElement('span', null, t.panelStyles),
+        ),
+        createElement('div', { className: 'dsh-suspend-settings-hint' }, t.panelStylesHint),
+        /* Timestamp chip. */
+        createElement(
+          'label',
+          { className: 'dsh-suspend-settings-toggle' },
+          createElement('input', {
+            type: 'checkbox',
+            checked: prefs.timeChip !== false,
+            onChange: (event) =>
+              commit({
+                askOnPark: prefs.askOnPark,
+                defaultPresetId: prefs.defaultPresetId,
+                tipPlacement: prefs.tipPlacement,
+                projectBadge: prefs.projectBadge,
+                panelStyles: prefs.panelStyles,
+                timeChip: event.target.checked,
+                presets: prefs.presets,
+              }),
+          }),
+          createElement('span', null, t.timeChip),
+        ),
+        createElement('div', { className: 'dsh-suspend-settings-hint' }, t.timeChipHint),
         /* Where the hover note hangs relative to DSH's own session card. */
         createElement('div', { className: 'dsh-suspend-settings-label' }, t.tipPlacement),
         createElement(
@@ -1485,9 +1795,15 @@ window.__ModuleLoader__.load({
      * ---------------------------------------------------------------- */
 
     /** sidebar.footer.action — opens the parked-session panel. */
-    function FooterAction({ wide, useSessions }) {
+    function FooterAction({ wide, useSessions, useWorkspaces }) {
       const snapshot = useSuspendStore()
       const byId = useSessions((state) => state.byId)
+      /* Workspace membership. This is a GlobalStandardProp merged in by
+         dsh-client-ui-workspace, so it arrives with the same seat as
+         useSessions and needs no inject. Read defensively: an older host
+         that does not provide it simply leaves the counts at zero rather
+         than breaking the component. */
+      const workspaces = useWorkspaces ? useWorkspaces((state) => state.items) : null
       const [open, setOpen] = React.useState(false)
       const anchorRef = React.useRef(null)
       const panelRef = React.useRef(null)
@@ -1512,11 +1828,37 @@ window.__ModuleLoader__.load({
         for (const [title, sessionId] of byTitle) sessionsByTitle.set(title, sessionId)
       }, [byId])
 
+      /* Feed the two module-level indexes the row highlighter reads. They live
+         outside React because syncRows() runs from an observer and a timer,
+         not from a render. */
+      React.useEffect(() => {
+        const known = new Set()
+        for (const sessionId of Object.keys(byId || {})) known.add(sessionId)
+        knownSessionIds = known
+        scheduleRowSync(0)
+      }, [byId])
+
+      React.useEffect(() => {
+        const members = []
+        for (const item of workspaces || []) {
+          if (!item) continue
+          const key = typeof item.workspaceId === 'string' ? item.workspaceId : ''
+          const sessionIds = Array.isArray(item.sessionIds) ? item.sessionIds : []
+          members.push({ key, sessionIds })
+        }
+        workspaceMembers = members
+        scheduleRowSync(0)
+      }, [workspaces])
+
       const entries = React.useMemo(() => orderEntries(snapshot), [snapshot])
       const count = entries.length
       const label = `${t.footer}${count > 0 ? ` (${count})` : ''}`
       const [view, setView] = React.useState('list')
       const [openFailed, setOpenFailed] = React.useState('')
+      /* Panel-side presentation toggles. `!== false` so a snapshot that
+         predates the key (or a host that never sends it) stays enabled. */
+      const panelStyles = snapshot.presets.panelStyles !== false
+      const timeChip = snapshot.presets.timeChip !== false
 
       const panel = open
         ? createPortal(
@@ -1574,16 +1916,35 @@ window.__ModuleLoader__.load({
                   : createElement(
                     'ul',
                     { className: 'dsh-suspend-panel-list' },
-                    entries.map((entry) =>
-                      createElement(
+                    entries.map((entry) => {
+                      const preset = panelStyles ? presetFor(entry) : null
+                      const row = createElement(
                         'li',
-                        { key: entry.id, className: 'dsh-suspend-panel-row' },
+                        {
+                          key: entry.id,
+                          className: 'dsh-suspend-panel-row' + (preset ? ` dsh-suspend-s-${preset.style}` : ''),
+                          /* Same signature as the sidebar row, so a preset is
+                             recognisable here without re-learning it. Written
+                             straight into the element's own props: calling
+                             applyPresetStyle() on the value createElement
+                             returns would target a VIRTUAL element, which has
+                             no classList — and throws, taking the whole slot
+                             (and with it the sidebar footer) down with it. */
+                          'data-preset': preset ? preset.id : '',
+                          style: preset
+                            ? { '--dsh-suspend-c': preset.color, '--dsh-suspend-a': String(preset.opacity) }
+                            : undefined,
+                        },
                         createElement('div', { className: 'dsh-suspend-panel-row-title', title: entry.title }, entry.title),
                         createElement('div', { className: 'dsh-suspend-panel-row-note' }, entry.note),
                         createElement(
                           'div',
                           { className: 'dsh-suspend-panel-row-foot' },
-                          createElement('span', { className: 'dsh-suspend-panel-row-time' }, relativeTime(entry.createdAt)),
+                          createElement(
+                            'span',
+                            { className: 'dsh-suspend-panel-row-time' + (timeChip ? ' dsh-suspend-time-chip' : '') },
+                            relativeTime(entry.createdAt),
+                          ),
                           createElement(
                             'span',
                             { className: 'dsh-suspend-panel-row-actions' },
@@ -1612,8 +1973,9 @@ window.__ModuleLoader__.load({
                             ),
                           ),
                         ),
-                      ),
-                    ),
+                      )
+                      return row
+                    }),
                   ),
               view === 'list' && openFailed
                 ? createElement('div', { className: 'dsh-suspend-panel-status' }, openFailed)
@@ -1647,17 +2009,19 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /** sidebar.toggle.badge — dot on the collapsed-sidebar expand button. */
-    function RailBadge() {
-      const snapshot = useSuspendStore()
-      const count = Object.keys(snapshot.notes).length
-      if (count === 0) return null
-      return createElement('span', {
-        className: 'dsh-suspend-rail-badge',
-        title: `${t.parked} ${count}`,
-        'aria-hidden': 'true',
-      })
-    }
+    /* No `sidebar.toggle.badge` registration on purpose.
+     *
+     * That slot is `kind: "single"`, and dsh-client-ui-settings-general already
+     * fills it with DesktopUpdateBadge (its "an update is available" hint) at
+     * the default priority 0. Registering at the same priority used to throw
+     * "single slot ... already has a registration at priority 0 (registered by
+     * lc)" on every boot, and the only priority that would have made ours
+     * render is one BELOW core's — i.e. shadowing the update badge, which is
+     * not a trade worth making.
+     *
+     * Nothing is lost: `sidebar.footer.action` is rendered in rail mode too
+     * (the foot area is built regardless of `wide`), and the footer button
+     * already carries its own rail dot — see `.dsh-suspend-rail-dot` below. */
 
     /** conversation.session.header.actions — manual park-note editor. */
     function HeaderAction({ sessionId }) {
@@ -1831,7 +2195,11 @@ window.__ModuleLoader__.load({
             childList: true,
             subtree: true,
             attributes: true,
-            attributeFilter: ['class'],
+            /* `aria-expanded` is how a Workspace group row reports folded vs
+               open, and React flips it in place on the same DOM node — so
+               without it a fold/unfold alone would not re-run the sync and the
+               count badge would lag one interaction behind. */
+            attributeFilter: ['class', 'aria-expanded'],
           })
         }
 
@@ -1861,9 +2229,6 @@ window.__ModuleLoader__.load({
       // Each inject waits for the slot declaration, so load order never matters.
       ctx.slots.inject('sidebar.footer.action', () =>
         ctx.slots.register({ name: 'sidebar.footer.action', id: 'session-suspend-footer', order: 50 }, FooterAction),
-      )
-      ctx.slots.inject('sidebar.toggle.badge', () =>
-        ctx.slots.register({ name: 'sidebar.toggle.badge', id: 'session-suspend-rail', priority: 0 }, RailBadge),
       )
       ctx.slots.inject('conversation.session.header.actions', () =>
         ctx.slots.register(
@@ -1921,6 +2286,19 @@ window.__ModuleLoader__.load({
           hoveredRow = row
         },
         timing: { open: TIP_DELAY_MS, close: TIP_HIDE_GRACE_MS },
+        /* Panel + group-badge surface. */
+        applyPresetStyle,
+        isProjectRow,
+        projectGroupKey,
+        parkedCountsByGroup,
+        paintProjectBadge,
+        orderEntries,
+        setWorkspaceMembers: (members) => {
+          workspaceMembers = Array.isArray(members) ? members : []
+        },
+        setKnownSessionIds: (ids) => {
+          knownSessionIds = new Set(Array.isArray(ids) ? ids : [])
+        },
       }
     }
 

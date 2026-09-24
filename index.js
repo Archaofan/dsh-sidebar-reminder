@@ -168,11 +168,14 @@ const DEFAULT_PRESETS = [
   { id: 'p-later', nameKey: 'later', name: '稍后', style: 'dot', color: '#9b8cff', opacity: 1 },
 ]
 
-/** @type {{ askOnPark: boolean, defaultPresetId: string, tipPlacement: string, presets: Array<{id,name,style,color,opacity}> }} */
+/** @type {{ askOnPark: boolean, defaultPresetId: string, tipPlacement: string, projectBadge: boolean, panelStyles: boolean, timeChip: boolean, presets: Array<{id,name,style,color,opacity}> }} */
 let presetState = {
   askOnPark: true,
   defaultPresetId: DEFAULT_PRESETS[0].id,
   tipPlacement: DEFAULT_TIP_PLACEMENT,
+  projectBadge: true,
+  panelStyles: true,
+  timeChip: true,
   presets: DEFAULT_PRESETS.map((p) => ({ ...p })),
 }
 
@@ -194,6 +197,11 @@ async function loadPresets() {
     askOnPark: parsed.askOnPark === true,
     defaultPresetId: presets.some((p) => p.id === parsed.defaultPresetId) ? parsed.defaultPresetId : presets[0].id,
     tipPlacement: TIP_PLACEMENTS.includes(parsed.tipPlacement) ? parsed.tipPlacement : DEFAULT_TIP_PLACEMENT,
+    /* These three ship on, so an absent key must read as true — `=== true`
+       would silently switch the feature off for every existing install. */
+    projectBadge: parsed.projectBadge !== false,
+    panelStyles: parsed.panelStyles !== false,
+    timeChip: parsed.timeChip !== false,
     presets: presets.slice(0, MAX_PRESETS),
   }
 }
@@ -238,6 +246,9 @@ function snapshotPresets() {
     askOnPark: presetState.askOnPark,
     defaultPresetId: presetState.defaultPresetId,
     tipPlacement: presetState.tipPlacement,
+    projectBadge: presetState.projectBadge,
+    panelStyles: presetState.panelStyles,
+    timeChip: presetState.timeChip,
     tipPlacements: TIP_PLACEMENTS,
     styles: PRESET_STYLES,
     presets: presetState.presets.map((p) => ({ ...p })),
@@ -417,6 +428,11 @@ function registerRoutes(webServer, log) {
                 askOnPark: body.askOnPark === true,
                 defaultPresetId: ids.has(body.defaultPresetId) ? body.defaultPresetId : presets[0].id,
                 tipPlacement: TIP_PLACEMENTS.includes(body.tipPlacement) ? body.tipPlacement : presetState.tipPlacement,
+                /* Default-on: an absent key keeps the feature on rather than
+                   silently disabling it for an older client. */
+                projectBadge: body.projectBadge !== false,
+                panelStyles: body.panelStyles !== false,
+                timeChip: body.timeChip !== false,
                 presets: presets.slice(0, MAX_PRESETS),
               }
             })
