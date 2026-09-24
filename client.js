@@ -1198,11 +1198,20 @@ window.__ModuleLoader__.load({
      * late host card costs latency, never a jump.
      *
      * 'right' placement needs no measurement, so it never waits.
+     *
+     * A MISSING deadline is treated as "no budget", not as "wait forever". The
+     * wait ends when the card is measurable or when the budget runs out; with
+     * no deadline there is no budget to run out of, and the guard that reads as
+     * defensive (`typeof deadline === 'number'`) inverts the safe default --
+     * outOfTime stays false, the frame callback re-enters, and the tooltip
+     * never appears at all. The deterministic fallback is what a host that
+     * shows no card is supposed to get, so "no budget" means "place now".
      */
     function showTipWhenReady(row, sessionId, deadline) {
       if (hoveredRow !== row || !row.isConnected) return
       if (store.presets.tipPlacement === 'below') {
-        const outOfTime = typeof deadline === 'number' && Date.now() >= deadline
+        const hasBudget = typeof deadline === 'number' && Number.isFinite(deadline)
+        const outOfTime = !hasBudget || Date.now() >= deadline
         if (!outOfTime && officialCardBottom(row.getBoundingClientRect()) === 0) {
           requestAnimationFrame(() => showTipWhenReady(row, sessionId, deadline))
           return

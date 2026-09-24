@@ -435,18 +435,27 @@ are self-tested the same way (lowercase names, `{kind:'success'|'error'}`
 returns).
 
 `.sandbox/gate.cjs` is the overall regression gate: both faces run the good build
-plus broken builds — ten client variants (`inject` naming an unreachable
+plus broken builds — twelve client variants (`inject` naming an unreachable
 service; reading `ctx.locale` without listing `locale` in `inject`; a
 `noteByTitle` shape mismatch; the tooltip hung back over the sidebar;
 `below-left` guessing the official card's height; `showTipWhenReady` no longer
 waiting; the open delay drifting from 500; the close grace drifting from 200; a
 language switch that never rebinds the dictionary; a settings nav label written
-as a static string) and three host variants (`suspend_session` returning an
+as a static string; the card-wait budget shrinking back to the old frame count,
+which is the 0.1.7 regression itself; a missing deadline read as "wait forever"
+instead of "no budget") and three host variants (`suspend_session` returning an
 undeclared `presetId`; `/suspend` ignoring its rawInput; a command name the
 registry would reject). All must be rejected (exit 1) while all four good builds
 pass (exit 0: Chinese, English, and a deliberately mismatched combination —
 English document, Chinese framework locale — proving the plugin follows the
 framework language).
+
+`check-host-card.cjs` runs as a third half of the gate and reads a **real DSH
+install**: it fails if the official card's width (244px), its 8px anchor offset
+or its dwell ever drift outside what the plugin assumes. None of those is a
+published contract, which is why the drift has to be detected rather than
+trusted — it runs against every installed version, so a new DSH that moves any
+of them fails the gate here instead of in a user's sidebar.
 
 Three e2e scripts drive the **real GUI** in a real browser (Playwright), where
 the slot registry, React rendering, the official `HoverCard`, the official
