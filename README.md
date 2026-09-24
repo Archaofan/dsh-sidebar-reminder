@@ -154,7 +154,16 @@ not touch the profile's dependency tree.
 pnpm pack --pack-destination .
 
 # install into the production profile
-dsh plugin --profile web add dsh-session-suspend-0.1.5.tgz --ignore-scripts
+dsh plugin --profile web add dsh-session-suspend-0.2.3.tgz --ignore-scripts
+```
+
+The version in the filename tracks the current release — check the
+[releases page](https://github.com/Archaofan/dsh-sidebar-reminder/releases) rather
+than copying the one written here, which is the sort of thing that goes stale the
+moment a release ships. The equivalent one-liner, which needs no local pack:
+
+```bash
+dsh plugin --profile web add https://github.com/Archaofan/dsh-sidebar-reminder/releases/download/v0.2.3/dsh-session-suspend-0.2.3.tgz
 ```
 
 Self-contained: once installed, moving or deleting the plugin directory does not
@@ -326,6 +335,13 @@ Changing a production DSH directly is genuinely risky: a bad patch or manifest
 fails the **whole plugin tree** and DSH will not boot. This repo's workflow is
 "sandbox first", and the sandbox is already set up and verified:
 
+> **The sandbox rig is git-ignored.** `.sandbox/`, `.sandbox-next/` and every
+> `*.tgz` are excluded, because the rig contains two full DSH installs. A fresh
+> clone therefore has none of it, and the commands below will not run until it
+> is rebuilt. What *is* committed is the published package itself — `index.js`,
+> `client.js`, `cordis.patch.yml`, both READMEs and `LICENSE` — so the plugin
+> installs from a clone without any of this.
+
 ```
 .sandbox/        DSH 0.1.6-alpha.2 — the regression baseline
 ├── dsh/          a full DSH install at the same version as production (0.1.6-alpha.2)
@@ -347,8 +363,9 @@ node --check index.js && node --check client.js
 # 1. pack and install into the sandbox profile (self-contained, deps travel with it)
 $env:DSH_HOME = 'E:\DSH-Workspace\DSH-Plugin\.sandbox\home'
 npm pack --ignore-scripts            # produces dsh-session-suspend-<version>.tgz
+$tgz = (Get-ChildItem .sandbox\dsh-session-suspend-*.tgz | Sort-Object LastWriteTime | Select-Object -Last 1).FullName
 node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox remove dsh-session-suspend
-node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add .sandbox\dsh-session-suspend-0.1.5.tgz --ignore-scripts
+node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add $tgz --ignore-scripts
 
 # 2. boot the sandbox (isolated port 12996, loopback only, isolated home — never touches production)
 node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js --profile sandbox --no-open --port 12996 --host 127.0.0.1
@@ -480,9 +497,12 @@ Settings window and the command discovery are all genuine:
   really flips the host-side preference, and `/suspend`, `/suspended`, `/resume`
   typed into a real session park, list and clear with the flow node visible in
   the timeline.
-- `.sandbox/e2e-settings-page.mjs` — the plugin manager card shows v0.1.5, the
-  package name and the Chinese-first description, with the component reported as
-  running (the only place activation is reported per plugin).
+- `.sandbox/e2e/e2e-settings-page.mjs` — the plugin manager card shows the
+  version, the package name and the Chinese-first description, with the
+  component reported as running (the only place activation is reported per
+  plugin). The version is read from `package.json` rather than written into
+  the test, so a release that forgets to bump it fails here instead of
+  passing against a stale expectation.
 
 ```bash
 pnpm install                      # once, for the playwright devDependency

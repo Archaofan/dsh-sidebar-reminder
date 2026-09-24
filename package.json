@@ -64,7 +64,9 @@
     "e2e:new": "node .sandbox/e2e/e2e-new-surfaces.mjs",
     "e2e:features": "node .sandbox/e2e-new-features.mjs",
     "e2e:page": "node .sandbox/e2e-settings-page.mjs",
-    "peers": "node .sandbox/verify-peer-claim.cjs ."
+    "peers": "node .sandbox/verify-peer-claim.cjs .",
+    "releases": "node .sandbox/verify-releases.cjs",
+    "release-contents": "node .sandbox/verify-release-contents.cjs"
   },
   "devDependencies": {
     "playwright": "^1.63.0"

@@ -121,7 +121,15 @@ DSH 网页版的「会话挂起提醒」插件：在对话里用自然语言描�
 pnpm pack --pack-destination .
 
 # 装进生产 profile
-dsh plugin --profile web add E:\DSH-Workspace\DSH-Plugin\dsh-session-suspend-0.1.5.tgz --ignore-scripts
+dsh plugin --profile web add dsh-session-suspend-0.2.3.tgz --ignore-scripts
+```
+
+文件名里的版本号跟当前 release 走——照抄这里写的那个不如去
+[releases 页](https://github.com/Archaofan/dsh-sidebar-reminder/releases)看一眼，
+这种写死的版本号正是发完新版就开始骗人的东西。不想本地打包的话，等价的一行：
+
+```bash
+dsh plugin --profile web add https://github.com/Archaofan/dsh-sidebar-reminder/releases/download/v0.2.3/dsh-session-suspend-0.2.3.tgz
 ```
 
 自包含：装完后即使插件目录被移动/删除也不影响生产；升级时重新打包再 `add` 一次即可。
@@ -248,6 +256,12 @@ DSH 安装目录，一旦卡片的宽度、8px 锚点偏移或 dwell 漂移出�
 插件直接改生产 DSH 的风险是真实的：补丁或清单有问题会让**整个插件树加载失败、DSH 起不来**。
 本仓库的开发流程是「沙箱先行」，沙箱已搭好并验证过：
 
+> **沙箱这套东西是 git-ignored 的。** `.sandbox/`、`.sandbox-next/` 和所有
+> `*.tgz` 都被排除了，因为里面装着两套完整的 DSH 安装。所以全新 clone 出来
+> 一样都没有，下面的命令在建好它之前是跑不起来的。真正提交进仓库的是发布包
+> 本身——`index.js`、`client.js`、`cordis.patch.yml`、两份 README 和 `LICENSE`——
+> 所以从 clone 直接安装插件是没问题的。
+
 ```
 .sandbox/        DSH 0.1.6-alpha.2 —— 回归基线
 ├── dsh/          与生产同版本（0.1.6-alpha.2）的完整 DSH 安装副本
@@ -267,8 +281,9 @@ node --check index.js && node --check client.js
 # 1. 打包并装进沙箱 profile（自包含，依赖随包走）
 $env:DSH_HOME = 'E:\DSH-Workspace\DSH-Plugin\.sandbox\home'
 npm pack --ignore-scripts            # 产物 dsh-session-suspend-<version>.tgz
+$tgz = (Get-ChildItem .sandbox\dsh-session-suspend-*.tgz | Sort-Object LastWriteTime | Select-Object -Last 1).FullName
 node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox remove dsh-session-suspend
-node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add .sandbox\dsh-session-suspend-0.1.5.tgz --ignore-scripts
+node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add $tgz --ignore-scripts
 
 # 2. 引导沙箱（独立端口 12996、仅回环、独立 home，绝不碰生产）
 node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js --profile sandbox --no-open --port 12996 --host 127.0.0.1
@@ -414,8 +429,10 @@ bug，测试工具必须把它拒掉。
   开关 / 预设列表，勾选「挂起时选择样式」后 host 侧的偏好真的翻转；再在真实
   会话里依次打 `/suspend`、`/suspended`、`/resume`，挂起、列表、清除都在
   时间线里看得到。
-- `.sandbox/e2e-settings-page.mjs`——插件管理页里我们的卡片显示 v0.1.5、
+- `.sandbox/e2e-settings-page.mjs`——插件管理页里我们的卡片显示版本号、
   包名、中文优先的描述，且组件状态是「运行中」（这是唯一按插件报告激活状态的地方）。
+  版本号是从 `package.json` 读的，不是写死在测试里的——所以哪个版本忘了
+  bump，是在这儿挂掉，而不是拿一个过期的期望值蒙混过关。
 
 ```bash
 pnpm install                      # 装一次，拿 playwright 开发依赖
