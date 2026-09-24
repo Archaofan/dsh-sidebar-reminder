@@ -13,6 +13,17 @@ package-lock.json
 # holds live credentials and session state -- never commit a DSH_HOME.
 .sandbox-next/
 
+# A DSH_HOME is a directory of live credentials (.credentials.yaml,
+# .anonymous-user-id, settings.yaml). Ignore the shapes one could take so a
+# stray `git add -A` can never stage one, wherever it appears.
+home/
+.sandbox/home/
+*.credentials.yaml
+*.credentials.yml
+.anonymous-user-id
+settings.yaml
+settings.yaml.imported
+
 # development notes — internal research, not part of the published package
 *调研*
 *报告*
