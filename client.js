@@ -993,8 +993,6 @@ window.__ModuleLoader__.load({
         button = document.createElement('button')
         button.type = 'button'
         button.className = PARK_BTN_CLASS
-        button.title = t.parkAction
-        button.setAttribute('aria-label', t.parkAction)
         button.innerHTML = PIN_SVG
         // Never let the row's own click handler open the session.
         button.addEventListener('pointerdown', (event) => event.stopPropagation())
@@ -1006,6 +1004,17 @@ window.__ModuleLoader__.load({
         })
         host.appendChild(button)
       }
+      /* Refreshed on EVERY call, not only at creation.
+
+         syncRows runs from a MutationObserver and a timer, and a language
+         switch rebinds `t` without rebuilding the row -- React keeps the same
+         DOM node, so injectRowAction takes the "button already exists" branch
+         and a title captured once would keep the OLD language's tooltip and
+         aria-label until React happens to replace the row. The locale effect's
+         comment claims the plain-DOM surfaces "read `t` when they are next
+         built"; this one is never rebuilt, so it has to be re-read here. */
+      button.title = t.parkAction
+      button.setAttribute('aria-label', t.parkAction)
       if (sessionId) button.setAttribute('data-session', sessionId)
     }
 
@@ -2437,6 +2446,7 @@ window.__ModuleLoader__.load({
         paintRow,
         clearRowPaint,
         syncRows,
+        injectRowAction,
         updateTitles,
         setNote,
         savePresets,

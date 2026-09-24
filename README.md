@@ -435,7 +435,7 @@ are self-tested the same way (lowercase names, `{kind:'success'|'error'}`
 returns).
 
 `.sandbox/gate.cjs` is the overall regression gate: both faces run the good build
-plus broken builds — twelve client variants (`inject` naming an unreachable
+plus broken builds — thirteen client variants (`inject` naming an unreachable
 service; reading `ctx.locale` without listing `locale` in `inject`; a
 `noteByTitle` shape mismatch; the tooltip hung back over the sidebar;
 `below-left` guessing the official card's height; `showTipWhenReady` no longer
@@ -443,12 +443,20 @@ waiting; the open delay drifting from 500; the close grace drifting from 200; a
 language switch that never rebinds the dictionary; a settings nav label written
 as a static string; the card-wait budget shrinking back to the old frame count,
 which is the 0.1.7 regression itself; a missing deadline read as "wait forever"
-instead of "no budget") and three host variants (`suspend_session` returning an
+instead of "no budget"; the row park button labelled once and never following a
+language switch) and three host variants (`suspend_session` returning an
 undeclared `presetId`; `/suspend` ignoring its rawInput; a command name the
 registry would reject). All must be rejected (exit 1) while all four good builds
 pass (exit 0: Chinese, English, and a deliberately mismatched combination —
 English document, Chinese framework locale — proving the plugin follows the
 framework language).
+
+Four of those exist because a *test* was wrong rather than the plugin, which is
+the more dangerous direction: a harness that silently mis-drives the code proves
+a bug that does not exist, or misses one that does. Variants 2 and 12 were both
+found that way — `paintRow(row, hit)` takes exactly two arguments, and
+`showTipWhenReady` needs a deadline — so the gate mutates the *source* to
+reproduce each known bug and the harness must reject it.
 
 `check-host-card.cjs` runs as a third half of the gate and reads a **real DSH
 install**: it fails if the official card's width (244px), its 8px anchor offset
