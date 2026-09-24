@@ -1928,7 +1928,14 @@ window.__ModuleLoader__.load({
           const title = typeof summary.displayTitle === 'string' ? summary.displayTitle.trim() : ''
           if (title) {
             titles[sessionId] = title
-            byTitle.set(title, sessionId)
+            /* First wins, matching noteByTitle()'s documented rule. The two
+               indexes must agree: noteByTitle decides which note paints the
+               row and what ROW_ATTR is set to, while this one answers
+               rowSessionId()'s title fallback. With last-wins here a duplicate
+               title paints as session A while the same row resolves back to
+               session B -- reachable whenever the React fiber is not, which is
+               exactly the fallback path this index exists for. */
+            if (!byTitle.has(title)) byTitle.set(title, sessionId)
           }
         }
         updateTitles(titles)
@@ -2299,9 +2306,22 @@ window.__ModuleLoader__.load({
           const next = dictFor(locale.getLocale ? locale.getLocale().active : '')
           if (next !== t) {
             t = next
-            /* Re-render every React surface. The plain-DOM ones (tooltip,
-               park popover) read `t` when they are next built, so they need
-               no signal. */
+            /* Re-render every React surface. The plain-DOM surfaces split by
+               whether they are REBUILT or REUSED, and only the rebuilt ones can
+               rely on reading `t` at build time:
+
+                 rebuilt -- the tooltip and the park popover clear their root
+                           and construct fresh nodes, so they pick up the new
+                           dictionary the next time they open.
+                 reused  -- the row park button lives across syncRows passes
+                           (MutationObserver + timer, and React keeps the same
+                           DOM node), so injectRowAction re-reads t.parkAction
+                           on EVERY call. Writing it only at creation is what
+                           v0.2.1 shipped, and it left the button in the old
+                           language until React replaced the row.
+
+               The blanket claim that "plain-DOM surfaces read `t` when next
+               built" is what hid that: it is true of two of the three. */
             emitChange()
           }
         }
@@ -2447,6 +2467,8 @@ window.__ModuleLoader__.load({
         clearRowPaint,
         syncRows,
         injectRowAction,
+        rowSessionId,
+        sessionsByTitle,
         updateTitles,
         setNote,
         savePresets,
