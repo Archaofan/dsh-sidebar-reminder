@@ -15,6 +15,7 @@
  *   <guiUrl>  the token URL DSH prints at boot, e.g. http://127.0.0.1:12996/?token=...
  */
 import { chromium } from 'playwright'
+import { dismissFirstRun } from './dismiss-first-run.mjs'
 
 const url = process.argv[2]
 if (!url) {
@@ -56,6 +57,14 @@ await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 })
 /* 1. the plugin's own surfaces must exist in the real slot registry */
 console.log('— plugin surfaces —')
 await page.waitForTimeout(6000)
+
+/* 0.7 dismiss the first-run onboarding, if the GUI is showing it.
+   AFTER the settle above, not before: the dialogs appear once the app has
+   booted, and a mask left behind intercepts every later click. */
+console.log('— first-run onboarding —')
+const onboardingClear = await dismissFirstRun(page)
+check(onboardingClear, 'the first-run onboarding is dismissed',
+  'a modal is still covering the page, so the sidebar cannot be clicked')
 
 const footer = page.locator('button', { hasText: /挂起提醒|Parked/ }).first()
 const footerCount = await footer.count()

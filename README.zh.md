@@ -107,7 +107,9 @@ DSH 网页版的「会话挂起提醒」插件：在对话里用自然语言描�
 
 ## 安装
 
-需要 DSH ≥ 0.1.6-alpha.1 的 web profile。两个 `@deepseek-ai/*` 依赖
+已在 **DSH 0.1.6-alpha.2 与 0.1.7-rc.2 两条线上实测通过**——同一个包两边都能跑
+（见[DSH 版本兼容](#dsh-版本兼容)）。需要 DSH ≥ 0.1.6-alpha.1 的 web profile。
+两个 `@deepseek-ai/*` 依赖
 （`dsh-home-paths`、`dsh-tools`）按生态惯例声明为 **peerDependencies**（同
 `dsh-better-sidebar`）：打包安装时由包管理器装进插件自己在 profile 里的
 `node_modules`，不改动 profile 的依赖树；版本范围与 harness 一致。
@@ -189,11 +191,35 @@ client.js  浏览器半边：轮询 / 面板 / 角标 / 行高亮 / 悬停 toolt
 | **官方卡片右侧** | `行右缘 + 260`，并排 | 不依赖官方卡片高度，所以**不可能跳**；但指针要跑约 385px |
 
 「左下」会去量官方卡片的下沿，量不到时就退到**和「右侧」完全相同**的那个确定位置，
-所以卡片绝不会从一个地方跑到另一个地方。「左下」还会用 `requestAnimationFrame`
-等官方卡片布局好再一次画定，而不是先按兜底位置画、事后校正（那个校正正是卡片可见滑动的来源）。
+所以卡片绝不会从一个地方跑到另一个地方。「左下」还会等官方卡片布局好再一次画定，
+而不是先按兜底位置画、事后校正（那个校正正是卡片可见滑动的来源）。
 
-时序与官方 `HoverCard` 完全一致——开 500ms（`openDelayMs`）、关 200ms
-（`usePointerGrace`）——两张卡片节奏不一致时，哪怕各自都正确，看起来也像出了 bug。
+时序与官方 `HoverCard` 对齐——开 500ms、关 200ms（`usePointerGrace`）——两张卡片
+节奏不一致时，哪怕各自都正确，看起来也像出了 bug。其中**开**这一侧是**下限**而不是
+写死的宿主持有值：官方 dwell 不是契约，而且已经变过一次（0.1.7 的会话行卡片传
+`openDelayMs: 800`，0.1.6 用的是 500 默认值）。因此插件最早也在 500ms 才出现，
+之后再继续等，最多等到一个 700ms 的预算用完，直到官方卡片可测量为止——这样不管宿主
+dwell 是 500 还是 800，两张卡片都是一起出现的。`check-host-card.cjs` 会读真实的
+DSH 安装目录，一旦卡片的宽度、8px 锚点偏移或 dwell 漂移出插件假设的范围就报错。
+
+## DSH 版本兼容
+
+同一个包，两条线都实测过。0.1.7 的变化与对应处理：
+
+| 0.1.7 的变化 | 对本插件的影响 | 处理方式 |
+| --- | --- | --- |
+| 会话行 `HoverCard` 的 dwell 从 500 提到 **800ms** | 提示框原本按**帧数**（约 100ms）等待，官方卡片还有 300ms 才出现时等待就到期了，「左下」于是按兜底位置画在行旁边，而不是画到官方卡片下面 | 等待改成 **700ms 的时间预算**。预算用完前不显示任何东西，所以宿主更慢只意味着多等一会儿，绝不会出现跳动。门禁变体 11 复现这个 bug |
+| 首次运行引导（内测声明 + API Key） | 整页遮罩会拦掉所有点击，侧边栏点不动，e2e 在**第一个**点击就失败 | `dismissFirstRun(page)`——在 GUI 稳定**之后**再关（先关会找不到对话框，随后遮罩出现，下一次点击就超时），并按 **exact** 的 role 名称点最后一个按钮 |
+| 插件管理页卡片标题改成完整包名（`dsh-session-suspend`，不再是 `session-suspend`） | e2e 的卡片选择器匹配的是文本恰为 `session-suspend` 的元素 | 改为匹配 `…_cardTitle` class 加 `session-suspend$` 后缀，两种拼写都能中 |
+| 会话日志格式 **v3 → v4** | 0.1.6 写的会话 0.1.7 读不了（反之亦然）——这是环境限制，不是插件的。因此 0.1.7 的 profile 没有可测量的会话行 | 真实 GUI 的几何那一半放在 0.1.6 上跑（那边有真实会话）；0.1.7 上依赖行的检查报 *skipped* 而不是 *failed*，同样的几何假设由 `check-host-card.cjs` 对两个安装目录做静态守护 |
+| `dsh-settings` 重写、`ui-primitives` 图标具名导出整族改名 | 无影响——本插件只消费官方 slot（`sidebar.footer.action`、`conversation.session.header.actions`、`settings.section`），两条线上都稳定 | 不需要改；e2e 断言三个 slot 仍然渲染且无冲突注册 |
+
+插件运行时**不做任何版本门禁**：没有 `if (dshVersion)`。两个宿主由同一份代码处理，
+兼容性声明由 `check-host-card.cjs` 读每个安装目录来背书，而不是靠一个版本号字符串。
+
+两个 `@deepseek-ai/*` peer（`dsh-home-paths`、`dsh-tools`）在两条线上导出的签名完全
+一致——`defineTool(options)` 和 `dshHomePath(...segments)`——所以 0.1.6 的副本在 0.1.7
+宿主上同样可用，反之亦然。这一点是通过 diff 两个安装目录验证的，不是假设。
 
 ## 已知限制
 
@@ -223,11 +249,12 @@ client.js  浏览器半边：轮询 / 面板 / 角标 / 行高亮 / 悬停 toolt
 本仓库的开发流程是「沙箱先行」，沙箱已搭好并验证过：
 
 ```
-.sandbox/
+.sandbox/        DSH 0.1.6-alpha.2 —— 回归基线
 ├── dsh/          与生产同版本（0.1.6-alpha.2）的完整 DSH 安装副本
 ├── home/         独立的 DSH_HOME（profiles/sandbox、storages 都在这里）
 ├── node_modules/ 仅沙箱用的 pnpm
 └── boot-*.log    历次引导日志
+.sandbox-next/    DSH 0.1.7-rc.2 —— 适配目标
 ```
 
 日常验证循环（改代码 → 打包进沙箱 → 引导 → 看路由/UI → 再上生产）。**用 tarball 而不是

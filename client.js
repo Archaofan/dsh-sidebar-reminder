@@ -32,8 +32,12 @@ window.__ModuleLoader__.load({
     const ROUTE = '/session-suspend'
     /** Browser poll cadence for the note list. */
     const POLL_MS = 2500
-    /** Hover dwell before the row tooltip appears. Mirrors DSH's own HoverCard
-     *  (openDelayMs = 500) so the two cards surface together. */
+    /** Hover dwell before the row tooltip appears. This is a FLOOR, not the
+     *  host's value: DSH's own HoverCard dwell is not a published contract and
+     *  it has already moved once — the session-row card passed openDelayMs
+     *  800 in 0.1.7 (0.1.6 used the 500 default). Waiting for the card to
+     *  actually become measurable (TIP_CARD_WAIT_MS below) is what keeps the
+     *  two cards together, so this only has to be "not before the host". */
     const TIP_DELAY_MS = 500
     /** Row attribute written by the DOM highlighter. */
     const ROW_ATTR = 'data-dsh-suspend'
@@ -106,11 +110,27 @@ window.__ModuleLoader__.load({
      *   below — under it, at the same left edge
      */
     const TIP_PLACEMENTS = ['right', 'below']
-    /** How many frames to wait for DSH's card to lay out before giving up and
-     *  using the deterministic 'right' placement. Waiting (instead of placing
-     *  first and correcting later) is what keeps the card from visibly jumping
-     *  from beside the official card to underneath it. */
-    const TIP_WAIT_FRAMES = 6
+    /**
+     * How long to keep waiting for DSH's hover card to lay out before giving up
+     * and placing at the deterministic spot.
+     *
+     * This used to be a FRAME COUNT (6 frames, ~100ms), which assumed the host
+     * card commits within a frame or two of our own dwell. That held while both
+     * cards opened at 500ms; it broke the moment DSH raised the session-row
+     * card's openDelayMs to 800 in 0.1.7 — our card opened at 500ms, the
+     * official card was still 300ms away, the wait expired, and the tooltip
+     * landed at the fallback spot beside the row instead of under the card.
+     *
+     * A TIME budget fixes that without hardcoding either host value: we open no
+     * earlier than TIP_DELAY_MS, then keep checking until the card is
+     * measurable or this budget runs out. 700ms covers an 800ms host dwell
+     * (300ms past our floor) with room to spare, and a host that dwells at
+     * 500ms resolves on the first check.
+     *
+     * Waiting (instead of placing first and correcting later) is what keeps the
+     * card from visibly jumping from beside the official card to underneath it.
+     */
+    const TIP_CARD_WAIT_MS = 700
 
     function EMPTY_PRESETS() {
       return {
@@ -1167,19 +1187,24 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Show the tooltip, but first give DSH's own card a few frames to lay out.
+     * Show the tooltip, but first give DSH's own card time to lay out.
      *
-     * Both cards open on the same 500ms dwell, and DSH's commit can land a
-     * frame or two after ours. Placing immediately and correcting 150ms later
-     * made the card visibly slide from beside DSH's card to underneath it, so
-     * instead we wait (a handful of frames, imperceptible) and place once.
+     * Our dwell is a floor and DSH's is not a contract — it was 500ms in 0.1.6
+     * and 800ms for the session-row card in 0.1.7 — so the wait has to be a
+     * time budget rather than a frame count. Placing immediately and
+     * correcting later made the card visibly slide from beside DSH's card to
+     * underneath it, so instead we wait until the card is measurable (or the
+     * budget runs out) and place once. Nothing is displayed until then, so a
+     * late host card costs latency, never a jump.
+     *
      * 'right' placement needs no measurement, so it never waits.
      */
-    function showTipWhenReady(row, sessionId, attempt) {
+    function showTipWhenReady(row, sessionId, deadline) {
       if (hoveredRow !== row || !row.isConnected) return
-      if (store.presets.tipPlacement === 'below' && attempt < TIP_WAIT_FRAMES) {
-        if (officialCardBottom(row.getBoundingClientRect()) === 0) {
-          requestAnimationFrame(() => showTipWhenReady(row, sessionId, attempt + 1))
+      if (store.presets.tipPlacement === 'below') {
+        const outOfTime = typeof deadline === 'number' && Date.now() >= deadline
+        if (!outOfTime && officialCardBottom(row.getBoundingClientRect()) === 0) {
+          requestAnimationFrame(() => showTipWhenReady(row, sessionId, deadline))
           return
         }
       }
@@ -1236,9 +1261,14 @@ window.__ModuleLoader__.load({
       }
       if (tipTimer) clearTimeout(tipTimer)
       const sessionId = row.getAttribute(ROW_ATTR)
+      /* The budget starts when our own dwell elapses, so the total wait is
+         TIP_DELAY_MS + TIP_CARD_WAIT_MS — enough to absorb a slower host
+         dwell without ever showing the card in the wrong place. */
       tipTimer = setTimeout(() => {
         tipTimer = 0
-        if (hoveredRow === row && row.isConnected) showTipWhenReady(row, sessionId, 0)
+        if (hoveredRow === row && row.isConnected) {
+          showTipWhenReady(row, sessionId, Date.now() + TIP_CARD_WAIT_MS)
+        }
       }, TIP_DELAY_MS)
     }
 
@@ -2412,7 +2442,7 @@ window.__ModuleLoader__.load({
         setHovered: (row) => {
           hoveredRow = row
         },
-        timing: { open: TIP_DELAY_MS, close: TIP_HIDE_GRACE_MS },
+        timing: { open: TIP_DELAY_MS, close: TIP_HIDE_GRACE_MS, cardWait: TIP_CARD_WAIT_MS },
         /* Panel + group-badge surface. */
         applyPresetStyle,
         isProjectRow,

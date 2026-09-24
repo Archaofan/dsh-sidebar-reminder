@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-suspend",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "description": "会话挂起提醒：对话里自然语言挂起会话，侧边栏高亮并悬停显示提醒；折叠的工作区显示挂起数量；偏好接入 DSH 官方设置页，支持 /suspend /suspended /resume 斜杠命令。Park sessions with a natural-language note.",
   "type": "module",
   "main": "index.js",
@@ -68,7 +68,7 @@
     "playwright": "^1.63.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-home-paths": "^0.1.6-alpha.2",
-    "@deepseek-ai/dsh-tools": "^0.1.6-alpha.2"
+    "@deepseek-ai/dsh-home-paths": ">=0.1.6-alpha.1",
+    "@deepseek-ai/dsh-tools": ">=0.1.6-alpha.1"
   }
 }

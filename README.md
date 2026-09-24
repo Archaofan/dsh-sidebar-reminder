@@ -139,7 +139,9 @@ Click `📌 Park note` in the session page header, type the reminder and save
 
 ## Install
 
-Needs a DSH ≥ 0.1.6-alpha.1 web profile. The two `@deepseek-ai/*` dependencies
+Verified against **DSH 0.1.6-alpha.2 and 0.1.7-rc.2** — the same build runs on
+both (see [DSH version compatibility](#dsh-version-compatibility)). Needs a DSH
+≥ 0.1.6-alpha.1 web profile. The two `@deepseek-ai/*` dependencies
 (`dsh-home-paths`, `dsh-tools`) are declared as **peerDependencies** (the
 ecosystem convention, same as `dsh-better-sidebar`): when installed from a
 tarball they land in the plugin's own `node_modules` inside the profile and do
@@ -282,14 +284,41 @@ the whole problem:
 
 `Below-left` measures the official card's bottom edge and, when it cannot be
 measured, falls back to **exactly** the same spot as `Right` — so the card never
-moves from one place to another. `Below-left` also waits a few animation frames
-for the official card to lay out before drawing once, rather than drawing at the
-fallback and correcting later (that correction is what made the card visibly
-slide).
+moves from one place to another. `Below-left` also waits for the official card
+to lay out before drawing once, rather than drawing at the fallback and
+correcting later (that correction is what made the card visibly slide).
 
-Timings mirror the official `HoverCard` exactly — open 500ms (`openDelayMs`),
-close 200ms (`usePointerGrace`) — because two cards that disagree look broken
-even when each is individually correct.
+Timings mirror the official `HoverCard` — open 500ms, close 200ms
+(`usePointerGrace`) — because two cards that disagree look broken even when each
+is individually correct. The **open** side is a *floor*, not a hardcoded host
+value: DSH's dwell is not a contract and it has already moved once (the
+session-row card passes `openDelayMs: 800` in 0.1.7, where 0.1.6 used the 500
+default). So the plugin opens no earlier than 500ms and then keeps waiting, up to
+a 700ms budget, for the official card to become measurable — which places both
+cards together whether the host dwells at 500 or 800. `check-host-card.cjs`
+reads a real DSH install and fails if the card's width, its 8px anchor offset or
+its dwell ever drifts outside what the plugin assumes.
+
+## DSH version compatibility
+
+One build, verified on both lines. What changed in 0.1.7 and how it is handled:
+
+| 0.1.7 change | Effect on this plugin | Handling |
+| --- | --- | --- |
+| Session-row `HoverCard` dwell raised 500 → **800ms** | The tooltip's wait, sized in *frames* (~100ms), expired while the official card was still 300ms away, so `Below-left` drew at the fallback spot beside the row instead of under the card | The wait became a **700ms time budget**. Nothing is displayed until it resolves, so a slower host costs latency, never a jump. Gate variant 11 reproduces the regression |
+| First-run onboarding (内测声明 + API Key) | A full-page mask intercepts every click, so the sidebar was unclickable and e2e runs failed on the *first* click | `dismissFirstRun(page)` — dismisses **after** the GUI settles (dismissing first finds no dialog, then the mask appears and the next click times out) and clicks the last button by **exact** role name |
+| Plugin manager card title shows the full package name (`dsh-session-suspend`, not `session-suspend`) | The e2e's card selector matched an element whose text was exactly `session-suspend` | Matched on the `…_cardTitle` class plus a `session-suspend$` suffix, so both spellings drive the same check |
+| Session log format **v3 → v4** | Sessions written by 0.1.6 cannot be read by 0.1.7 (and vice versa) — an environment limit, not a plugin one. A 0.1.7 profile therefore has no session rows to measure against | The live-GUI geometry half runs on 0.1.6 (where real sessions exist); on 0.1.7 the row-dependent checks report *skipped* rather than *failed*, and the same geometry is guarded statically by `check-host-card.cjs` against both installs |
+| `dsh-settings` rewritten; `ui-primitives` icon exports renamed | None — this plugin only consumes official slots (`sidebar.footer.action`, `conversation.session.header.actions`, `settings.section`), which are stable across both | No change needed; the e2e asserts the three slots still render and register without conflict |
+
+Nothing in the plugin is version-gated at runtime: there is no `if (dshVersion)`.
+Both hosts are handled by the same code, and the compatibility claim is backed by
+`check-host-card.cjs` reading each install rather than by a version string.
+
+The two `@deepseek-ai/*` peers (`dsh-home-paths`, `dsh-tools`) expose the exact
+same signatures on both lines — `defineTool(options)` and
+`dshHomePath(...segments)` — so a 0.1.6 copy satisfies a 0.1.7 host and vice
+versa. That is verified by diffing both installs, not assumed.
 
 ## Development and sandbox verification
 
@@ -298,11 +327,12 @@ fails the **whole plugin tree** and DSH will not boot. This repo's workflow is
 "sandbox first", and the sandbox is already set up and verified:
 
 ```
-.sandbox/
+.sandbox/        DSH 0.1.6-alpha.2 — the regression baseline
 ├── dsh/          a full DSH install at the same version as production (0.1.6-alpha.2)
 ├── home/         an isolated DSH_HOME (profiles/sandbox, storages live here)
 ├── node_modules/ pnpm for the sandbox only
 └── boot-*.log    boot logs
+.sandbox-next/    DSH 0.1.7-rc.2 — the adaptation target
 ```
 
 The daily loop (edit → pack into the sandbox → boot → check routes/UI → only then
