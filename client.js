@@ -149,8 +149,10 @@ window.__ModuleLoader__.load({
     }
 
     /* ---------------------------------------------------------------- *
-     * Inline i18n — the plugin reads document language, not ctx.locale,
-     * so it loads without a locale face.
+     * Inline i18n. `document language` seeds the tables below so the
+     * bundle is usable before the locale face answers; once apply() runs,
+     * the dictionaries are published under ctx.locale and the active one
+     * follows the framework's language (see the locale effect).
      * ---------------------------------------------------------------- */
 
     const ZH = {
@@ -175,6 +177,8 @@ window.__ModuleLoader__.load({
       daysAgo: '天前',
       parkAction: '挂起会话',
       settings: '样式设置',
+      settingsNav: '挂起提醒',
+      settingsNavHint: '这里和侧边栏「挂起提醒」面板里的齿轮是同一份配置，改任何一处都会立即生效。',
       askOnPark: '挂起时选择样式',
       askOnParkHint: '打开后，每次挂起都会弹出下拉框让你选预设；关闭则直接用默认预设。',
       tipPlacement: '悬停框位置',
@@ -234,6 +238,8 @@ window.__ModuleLoader__.load({
       daysAgo: 'd ago',
       parkAction: 'Park session',
       settings: 'Style settings',
+      settingsNav: 'Parked Sessions',
+      settingsNavHint: 'The same preferences as the gear inside the "Parked" sidebar panel — one configuration, and a change in either place takes effect immediately.',
       askOnPark: 'Ask for a style when parking',
       askOnParkHint: 'On: every park opens a dropdown of your presets. Off: the default preset is used.',
       tipPlacement: 'Note card position',
@@ -283,8 +289,30 @@ window.__ModuleLoader__.load({
       return preset ? preset.name : ''
     }
 
-    const t =
-      (document.documentElement.lang || navigator.language || 'en').toLowerCase().startsWith('zh') ? ZH : EN
+    /**
+     * The active dictionary — a mutable module binding on purpose.
+     *
+     * Every read site (`t.footer`, `t.styleLabels[…]`, …) resolves the CURRENT
+     * dictionary at call time, so a runtime language switch only has to rebind
+     * this one name: React surfaces re-render through the store (apply()
+     * subscribes to `locale/change`), and the plain-DOM ones (hover tooltip,
+     * park popover) read `t` when they are next built.
+     *
+     * Seeded from the document language so the bundle also works before — and
+     * in compositions without — the locale face; apply() then aligns it to the
+     * framework's active locale, which is the one the user actually picked
+     * (document.documentElement.lang goes stale after an in-app language
+     * switch, because the page never reloads).
+     */
+    let t = (document.documentElement.lang || navigator.language || 'en').toLowerCase().startsWith('zh') ? ZH : EN
+
+    /** Locale namespace this plugin's dictionaries are published under. */
+    const LOCALE_NS = 'dsh-session-suspend'
+
+    /** Dictionary for one locale id ('zh', 'en', 'zh-CN', …; unknown reads as English). */
+    function dictFor(localeId) {
+      return String(localeId || '').toLowerCase().startsWith('zh') ? ZH : EN
+    }
 
     /* ---------------------------------------------------------------- *
      * Inline CSS (design tokens only — no hard-coded colors).
@@ -332,6 +360,10 @@ window.__ModuleLoader__.load({
       '.dsh-suspend-panel-back{border:0;background:0 0;color:var(--dsw-alias-label-secondary,#61666b);font:inherit;font-size:12px;cursor:pointer;padding:2px 4px}',
       '.dsh-suspend-panel-back:hover{color:var(--dsw-alias-label-primary,#0f1115)}',
       '.dsh-suspend-settings{display:flex;flex-direction:column;gap:8px;padding:2px 4px 4px}',
+      /* The official Settings window is far wider than the sidebar panel, so
+         the same editor is capped and re-titled there (see SettingsSection). */
+      '.dsh-suspend-page{display:flex;flex-direction:column;gap:10px;max-width:560px}',
+      '.dsh-suspend-page-title{color:var(--dsw-alias-label-primary,#0f1115);font-size:13px;font-weight:600}',
       '.dsh-suspend-settings-toggle{display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer}',
       '.dsh-suspend-settings-hint{color:var(--dsw-alias-label-tertiary,#81858c);font-size:11px;line-height:15px}',
       '.dsh-suspend-settings-label{margin-top:2px;color:var(--dsw-alias-label-secondary,#4b4f56);font-size:12px;font-weight:500}',
@@ -818,34 +850,42 @@ window.__ModuleLoader__.load({
       /* Computed once per pass, and only when the feature is on. */
       const counts = store.presets.projectBadge !== false ? parkedCountsByGroup() : null
       for (const row of document.querySelectorAll('[role="treeitem"]')) {
-        if (!isSidebarRow(row)) continue
-        /* Group rows are handled here and never fall through to the session
-           logic. This is also what stops a workspace label that happens to
-           equal a parked session's title from stamping the group row: the
-           title lookup below can no longer see project rows at all. */
-        if (isProjectRow(row)) {
-          paintProjectBadge(row, counts)
-          continue
+        /* One malformed row must never abort the pass: syncRows runs from a
+           MutationObserver and a timer, so a throw here would silently stop
+           EVERY row from being painted until the next unrelated mutation.
+           Fail-closed per row — the rest of the list still highlights. */
+        try {
+          if (!isSidebarRow(row)) continue
+          /* Group rows are handled here and never fall through to the session
+             logic. This is also what stops a workspace label that happens to
+             equal a parked session's title from stamping the group row: the
+             title lookup below can no longer see project rows at all. */
+          if (isProjectRow(row)) {
+            paintProjectBadge(row, counts)
+            continue
+          }
+          let hit
+          for (const text of rowTexts(row)) {
+            hit = byTitle.get(text)
+            if (hit) break
+          }
+          if (hit) {
+            row.setAttribute(ROW_ATTR, hit.sessionId)
+            paintRow(row, hit)
+            injectRowAction(row, hit.sessionId)
+            continue
+          }
+          if (row.hasAttribute(ROW_ATTR)) {
+            row.removeAttribute(ROW_ATTR)
+            clearRowPaint(row)
+            removeRowAction(row)
+            continue
+          }
+          // Not parked: still offer the park button when the row resolves to a session.
+          if (rowSessionId(row)) injectRowAction(row, '')
+        } catch (error) {
+          console.warn('[dsh-session-suspend] skipped one sidebar row:', error)
         }
-        let hit
-        for (const text of rowTexts(row)) {
-          hit = byTitle.get(text)
-          if (hit) break
-        }
-        if (hit) {
-          row.setAttribute(ROW_ATTR, hit.sessionId)
-          paintRow(row, hit)
-          injectRowAction(row, hit.sessionId)
-          continue
-        }
-        if (row.hasAttribute(ROW_ATTR)) {
-          row.removeAttribute(ROW_ATTR)
-          clearRowPaint(row)
-          removeRowAction(row)
-          continue
-        }
-        // Not parked: still offer the park button when the row resolves to a session.
-        if (rowSessionId(row)) injectRowAction(row, '')
       }
     }
 
@@ -1791,6 +1831,26 @@ window.__ModuleLoader__.load({
     }
 
     /* ---------------------------------------------------------------- *
+     * settings.section — DSH's own Settings window.
+     *
+     * The section reuses PresetSettings verbatim: the panel gear and the
+     * settings page are two doors into one editor, so a preference changed
+     * in either place is immediately visible in the other (both read the
+     * same host route and the same store snapshot).
+     * ---------------------------------------------------------------- */
+
+    function SettingsSection() {
+      const snapshot = useSuspendStore()
+      return createElement(
+        'div',
+        { className: 'dsh-suspend-page' },
+        createElement('div', { className: 'dsh-suspend-page-title' }, t.settingsNav),
+        createElement('div', { className: 'dsh-suspend-settings-hint' }, t.settingsNavHint),
+        createElement(PresetSettings, { snapshot }),
+      )
+    }
+
+    /* ---------------------------------------------------------------- *
      * Slot components.
      * ---------------------------------------------------------------- */
 
@@ -2165,12 +2225,53 @@ window.__ModuleLoader__.load({
      * ---------------------------------------------------------------- */
 
     /**
-     * Install polling, the row highlighter and the three slot registrations.
+     * Install polling, the row highlighter and the slot registrations.
      * @param ctx - client context.
      */
     function apply(ctx) {
       rootCtx = ctx
       const style = injectCss()
+
+      /* i18n: publish both dictionaries under our namespace, then follow the
+         framework's active locale so a language switch inside DSH's own
+         settings repaints this plugin without a reload. The document-language
+         seed above covers compositions without a locale face. */
+      ctx.effect(() => {
+        /* `locale` is listed in exports.inject, so cordis has already waited for
+           dsh-client-locale before this fiber activates. The client runner's ctx
+           is fail-loud: touching a service that is NOT in inject throws
+           "cannot get property X without inject" (that is what killed v0.1.5's
+           first cut — the effect read ctx.locale while inject was ['slots']).
+           The guard below stays for the same reason the unarchive-sessions
+           plugin keeps one: a composition that somehow lacks the face should
+           degrade to the document language, not kill the plugin tree. */
+        const locale = ctx.locale
+        if (!locale || typeof locale.register !== 'function') return () => {}
+        const align = () => {
+          const next = dictFor(locale.getLocale ? locale.getLocale().active : '')
+          if (next !== t) {
+            t = next
+            /* Re-render every React surface. The plain-DOM ones (tooltip,
+               park popover) read `t` when they are next built, so they need
+               no signal. */
+            emitChange()
+          }
+        }
+        try {
+          const disposeZh = locale.register(LOCALE_NS, 'zh', ZH)
+          const disposeEn = locale.register(LOCALE_NS, 'en', EN)
+          const unsubscribe = typeof locale.subscribe === 'function' ? locale.subscribe(align) : () => {}
+          align()
+          return () => {
+            unsubscribe()
+            disposeEn()
+            disposeZh()
+          }
+        } catch (error) {
+          console.warn('[dsh-session-suspend] locale registration failed; keeping the document language:', error)
+          return () => {}
+        }
+      }, 'session-suspend.locale()')
 
       ctx.effect(() => {
         const timer = setInterval(() => {
@@ -2236,20 +2337,41 @@ window.__ModuleLoader__.load({
           HeaderAction,
         ),
       )
+      /* DSH's own Settings window: one nav entry reusing the very same
+         preference editor the panel gear opens, so there is exactly one
+         implementation. `label` is a thunk — the registry re-evaluates it per
+         read, so the nav row follows the active locale without re-registering
+         (SlotLabel = string | (() => string)). The owner share is just
+         `{ close }`, which this section does not need. */
+      ctx.slots.inject('settings.section', () =>
+        ctx.slots.register(
+          { name: 'settings.section', id: 'session-suspend', order: 40, label: () => t.settingsNav },
+          SettingsSection,
+        ),
+      )
     }
 
     /**
      * Services required before this plugin loads.
      *
-     * ONLY `slots`. `uiWorkspace` is deliberately NOT listed: it is provided by
+     * `slots` and `locale` — both are registered at root scope by bundles that
+     * dsh-base itself composes (dsh-client-modules and dsh-client-locale), so
+     * both are ancestors of this fiber and cordis always finds them.
+     *
+     * `uiWorkspace` is deliberately NOT listed: it is provided by
      * dsh-client-ui-workspace's own fiber, which is a sibling rather than an
      * ancestor of this plugin's fiber, so it is not reachable from here.
      * Declaring it in `inject` makes cordis wait for a service that never
      * arrives, and the whole plugin then never activates — DSH reports that as
      * "web boot: 1 entry did not activate". It is instead read opportunistically
      * at click time inside openSession(), with a DOM fallback behind it.
+     *
+     * The runner's ctx is fail-loud: reading a service that is not listed here
+     * throws "cannot get property X without inject" during apply(), which also
+     * kills the whole tree — so this list is the contract for every ctx.* read
+     * in this file (effect/inject are cordis built-ins and always allowed).
      */
-    const inject = ['slots']
+    const inject = ['slots', 'locale']
 
     exports.apply = apply
     exports.inject = inject
@@ -2264,6 +2386,11 @@ window.__ModuleLoader__.load({
      */
     if (typeof window !== 'undefined' && window.__DSH_SUSPEND_TEST__) {
       exports.__test__ = {
+        /* The active dictionary, read through a getter so the harness observes
+           a language switch instead of a snapshot taken at export time. */
+        get t() {
+          return t
+        },
         store,
         noteByTitle,
         presetFor,

@@ -21,6 +21,8 @@ Single-purpose, no runtime dependencies, no build step — two source files
 | Hovering any session row | A pin button next to the official `…`, to write a note for **that** session |
 | **Folded workspace** | A count on the right of the workspace row while it is folded, telling you how many sessions inside it are parked. It disappears when you expand — the sessions are in front of you, so the number would be redundant |
 | Parked list | Every row is rendered with **its own** style preset, exactly like the sidebar; the parked time sits in a subtle filled chip instead of blending into the background |
+| **Official settings page** | A `Parked Sessions` entry in DSH's own Settings navigation, opening the **same** preference editor as the panel gear |
+| **Slash commands** | `/suspend <note>`, `/suspended`, `/resume` right in the composer — no model round-trip |
 
 > The hover card deliberately sits **below** the row: DSH itself draws a session
 > status card to the right of the row (`left = row right + 8`, 244px wide,
@@ -36,7 +38,14 @@ Single-purpose, no runtime dependencies, no build step — two source files
 
 ## Style presets
 
-Sidebar footer → gear → **Style settings**:
+The preference editor has two entrances with identical content (one
+`presets.json`; a change in either place takes effect immediately):
+
+- Sidebar footer → gear → **Style settings**
+- **Official settings page**: Settings navigation → **Parked Sessions** (DSH's own
+  Settings window — no need to open the sidebar panel first)
+
+Editor contents:
 
 - **Ask for a style when parking** (master switch, on by default): on, every park
   opens a dropdown of your presets; off, the default preset is used.
@@ -109,6 +118,20 @@ When it is done, say "这事结了 / 取消挂起 / done, unpark / clear the rem
 to call `resume_session`; ask "我还有哪些事没做完 / what is still parked?" to
 call `list_suspended`.
 
+### Slash commands (no model round-trip)
+
+Type a slash in the composer and DSH's command discovery lists this plugin's
+three registrations:
+
+| Command | What it does |
+| --- | --- |
+| `/suspend <note>` | Parks the **current** session; an empty note prints the usage |
+| `/suspended` | Lists every parked session (note + time, newest first) — the same data as the `list_suspended` tool |
+| `/resume` | Unparks the current session; says so plainly when nothing was parked |
+
+The outcome lands in the session timeline as a flow node (DSH does this for every
+command), and the sidebar highlight / badge / folded counts update with it.
+
 ### By hand
 
 Click `📌 Park note` in the session page header, type the reminder and save
@@ -125,11 +148,11 @@ not touch the profile's dependency tree.
 ### A. Tarball (recommended, self-contained)
 
 ```bash
-# in the plugin directory (6 delivered files, see package.json "files")
+# in the plugin directory (7 delivered files, see package.json "files")
 pnpm pack --pack-destination .
 
 # install into the production profile
-dsh plugin --profile web add dsh-session-suspend-0.1.2.tgz --ignore-scripts
+dsh plugin --profile web add dsh-session-suspend-0.1.5.tgz --ignore-scripts
 ```
 
 Self-contained: once installed, moving or deleting the plugin directory does not
@@ -189,8 +212,8 @@ mount first.
 ## How it works
 
 ```
-index.js   host face: 3 model tools + 3 local HTTP routes + JSON persistence
-client.js  browser face: polling / panel / badge / row highlight / hover card (single file, no build)
+index.js   host face: 3 model tools + 3 slash commands + 3 local HTTP routes + JSON persistence
+client.js  browser face: polling / panel / badge / row highlight / hover card / official settings section (single file, no build)
 ```
 
 - **Storage**: `~/.dsh/storages/session-suspend/suspended.json`
@@ -201,8 +224,12 @@ client.js  browser face: polling / panel / badge / row highlight / hover card (s
 - **Model tools**: `suspend_session` / `resume_session` / `list_suspended`,
   registered per DSH's `defineTool` convention; only a root agent may park its
   own session.
-- **UI**: official slots only (`sidebar.footer.action`, `sidebar.toggle.badge`,
-  `conversation.session.header.actions`); no official component is shadowed.
+- **Slash commands**: `/suspend` / `/suspended` / `/resume`, registered per
+  `ctx.commands.register` (names must be lowercase). They share the tools'
+  storage and resolution logic and just skip the model round-trip.
+- **UI**: official slots only (`sidebar.footer.action`,
+  `conversation.session.header.actions`, `settings.section`); no official
+  component is shadowed.
 - **Row highlight**: official session rows expose no per-row slot and read only
   the built-in `schedule` projection, so — like the community plugins
   (dsh-activity-bell et al.) — this uses DOM enhancement: a `data-dsh-suspend`
@@ -232,10 +259,11 @@ client.js  browser face: polling / panel / badge / row highlight / hover card (s
   and write the file.
 - One note per session (parking again replaces it); archived sessions keep their
   note until cleared manually.
-- Browser language comes from `document.documentElement.lang`; only Chinese and
-  English strings are built in.
-- Presets live in the plugin's own `presets.json` and are not wired into DSH's
-  official settings page (that would need `ctx.settings` / `settings.section`).
+- UI strings are built in for Chinese and English. The document language seeds
+  them at load, then the active dictionary **follows DSH's UI language**: switch
+  the language in Settings and the sidebar, panel and official settings section
+  all repaint without a reload (compositions without a locale face fall back to
+  the document language).
 - Opening a session goes through `uiWorkspace.openSession` (how DSH's own sidebar
   does it), falling back to clicking the matching sidebar row, then to a text
   hint in the panel.
@@ -288,24 +316,29 @@ node --check index.js && node --check client.js
 
 # 1. pack and install into the sandbox profile (self-contained, deps travel with it)
 $env:DSH_HOME = 'E:\DSH-Workspace\DSH-Plugin\.sandbox\home'
-& .sandbox\node_modules\.bin\pnpm.cmd pack --pack-destination .sandbox
+npm pack --ignore-scripts            # produces dsh-session-suspend-<version>.tgz
 node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox remove dsh-session-suspend
-node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add .sandbox\dsh-session-suspend-0.1.2.tgz --ignore-scripts
+node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add .sandbox\dsh-session-suspend-0.1.5.tgz --ignore-scripts
 
-# 2. boot the sandbox (isolated port 12991, loopback only, isolated home — never touches production)
-node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js --profile sandbox --no-open --port 12991 --host 127.0.0.1
+# 2. boot the sandbox (isolated port 12996, loopback only, isolated home — never touches production)
+node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js --profile sandbox --no-open --port 12996 --host 127.0.0.1
 
 # 3. verify (another terminal)
-curl http://127.0.0.1:12991/session-suspend/list
-curl -X POST http://127.0.0.1:12991/session-suspend/set -H "content-type: application/json" -d '{"sessionId":"t","note":"n"}'
-# open the http://127.0.0.1:12991/?token=... URL from the boot log to see the UI
+curl "http://127.0.0.1:12996/session-suspend/list?token=<token from the boot log>"
+curl -X POST "http://127.0.0.1:12996/session-suspend/set?token=<token>" -H "content-type: application/json" -d '{"sessionId":"t","note":"n"}'
+# open the http://127.0.0.1:12996/?token=... URL from the boot log to see the UI
 ```
 
-> When a port is taken, find the PID with `netstat -ano | Select-String '12991'`
+> When a port is taken, find the PID with `netstat -ano | Select-String '12996'`
 > (`Get-NetTCPConnection` is unreliable on this machine) and kill only the
 > sandbox process — **production listens on 12931 and must never be touched**.
 > (Production binds `0.0.0.0:12931`, so do not grep for `127.0.0.1:12931` or you
 > will wrongly conclude it is not running.)
+>
+> `npm pack` fails with a permissions error when the default cache is not
+> writable — point it at the sandbox's own cache:
+> `$env:npm_config_cache = 'E:\DSH-Workspace\DSH-Plugin\.sandbox\.npm-cache'`.
+> On Windows `npm.ps1` may be blocked by the execution policy; call `npm.cmd`.
 
 > ⚠️ **Interactive verification must be started by you, in a normal PowerShell
 > terminal — not by the AI assistant.** The official workspace directory picker
@@ -318,7 +351,8 @@ curl -X POST http://127.0.0.1:12991/session-suspend/set -H "content-type: applic
 
 Verified: the boot graph, all host routes and persistence (list / set / clear /
 presets, including 400/413 status codes and preset validation), the client bundle
-being composed and delivered, all three slots registering, the tarball install
+being composed and delivered, all three slots registering, the official settings
+section and the slash commands verified in a real browser, the tarball install
 path, the runtime guard against double mounts, and the negative cases of "missing
 dependency / port taken" boot failures (all caught by the sandbox, never reaching
 production). The sandbox is fully isolated (separate home / profile / port) and
@@ -345,8 +379,9 @@ node .sandbox/client-harness.cjs <installed client.js> # against the install art
 HARNESS_LANG=en node .sandbox/client-harness.cjs client.js  # same, in the English UI
 ```
 
-It checks eight things: no throw at module scope, `apply()` completing with all
-three slots registered, `inject` listing only reachable services, the **paint
+It checks ten things: no throw at module scope, `apply()` completing with all
+three slots registered, `inject` listing only reachable services (and covering
+every service the module reads — see pitfall 5), the **paint
 chain** (the `presetId` stored on the note really decides the row's style class
 instead of always falling back to the default preset), **preset name
 localization** (a built-in preset reads in the UI's language, and a renamed one
@@ -354,44 +389,72 @@ keeps its stored name), **tooltip placement** (both configured positions leave
 the sidebar band, neither covers the official card, and neither moves once
 drawn), **wait behaviour** (`below-left` waits for the official card instead of
 drawing first and correcting later, which is what made the card visibly jump),
-and **timing parity** (open 500ms / close 200ms, exactly the official
-`HoverCard`'s `openDelayMs = 500` and `usePointerGrace`'s 200ms).
+**timing parity** (open 500ms / close 200ms, exactly the official
+`HoverCard`'s `openDelayMs = 500` and `usePointerGrace`'s 200ms), **locale
+dictionaries and hot switching** (both zh and en published under `ctx.locale`;
+the active dictionary follows the framework locale rather than the document
+language, and a language switch rebinds it and repaints the store), and the
+**official settings section** (`settings.section` registers, its nav label is a
+locale-following thunk, and the component renders).
 
 `.sandbox/tool-schema.cjs` is the host face's counterpart: it registers the real
 tools, calls each one, and recursively checks that every field of the returned
 value is declared in the output schema (with `additionalProperties: false` an
-undeclared field is a violation — see pitfall 4 below).
+undeclared field is a violation — see pitfall 4 below). The three slash commands
+are self-tested the same way (lowercase names, `{kind:'success'|'error'}`
+returns).
 
 `.sandbox/gate.cjs` is the overall regression gate: both faces run the good build
-plus broken builds — seven client variants (`inject` naming an unreachable
-service; a `noteByTitle` shape mismatch; the tooltip hung back over the sidebar;
+plus broken builds — ten client variants (`inject` naming an unreachable
+service; reading `ctx.locale` without listing `locale` in `inject`; a
+`noteByTitle` shape mismatch; the tooltip hung back over the sidebar;
 `below-left` guessing the official card's height; `showTipWhenReady` no longer
-waiting; the open delay drifting from 500; the close grace drifting from 200) and
-one host variant (`suspend_session` returning an undeclared `presetId`). All must
-be rejected (exit 1) while both good builds pass (exit 0).
+waiting; the open delay drifting from 500; the close grace drifting from 200; a
+language switch that never rebinds the dictionary; a settings nav label written
+as a static string) and three host variants (`suspend_session` returning an
+undeclared `presetId`; `/suspend` ignoring its rawInput; a command name the
+registry would reject). All must be rejected (exit 1) while all four good builds
+pass (exit 0: Chinese, English, and a deliberately mismatched combination —
+English document, Chinese framework locale — proving the plugin follows the
+framework language).
 
-`e2e/client.mjs` is the last mile: it drives the **real GUI** in a real browser
-(Playwright), where the slot registry, React rendering and the official
-`HoverCard` are all genuine. It boots the token URL DSH prints, then checks that
-the plugin's footer button renders, that no "did not activate" error appears, that
-parked rows really carry the highlight attribute, and — the part no fake DOM can
-check — that hovering a row puts our card **below-left of the official card with
-no overlap**, that it **does not move after being drawn**, that its action buttons
-sit inside its own box, that it never hangs over the sidebar band, and that
-switching the placement actually moves it and persists to the host:
+Three e2e scripts drive the **real GUI** in a real browser (Playwright), where
+the slot registry, React rendering, the official `HoverCard`, the official
+Settings window and the command discovery are all genuine:
+
+- `.sandbox/e2e/e2e.mjs` — the footer button renders, no "did not activate"
+  error, parked rows really carry the highlight attribute, and — the part no
+  fake DOM can check — hovering a row puts our card **below-left of the official
+  card with no overlap**, it **does not move after being drawn**, its action
+  buttons sit inside its own box, it never hangs over the sidebar band, and
+  switching the placement actually moves it and persists to the host.
+- `.sandbox/e2e/e2e-new-surfaces.mjs` — the official settings page renders our
+  section (title / switches / preset list), toggling *Ask for a style* inside it
+  really flips the host-side preference, and `/suspend`, `/suspended`, `/resume`
+  typed into a real session park, list and clear with the flow node visible in
+  the timeline.
+- `.sandbox/e2e-settings-page.mjs` — the plugin manager card shows v0.1.5, the
+  package name and the Chinese-first description, with the component reported as
+  running (the only place activation is reported per plugin).
 
 ```bash
 pnpm install                      # once, for the playwright devDependency
-pnpm run e2e http://127.0.0.1:12996/?token=...   # from the sandbox boot log
-# E2E_CHROMIUM=/path/to/chrome.exe pnpm run e2e <url>   # any recent Chromium
-# E2E_SHOTS=<dir> pnpm run e2e <url>                    # also write screenshots
+node .sandbox/e2e/e2e.mjs http://127.0.0.1:12996/?token=...              # from the sandbox boot log
+node .sandbox/e2e/e2e-new-surfaces.mjs http://127.0.0.1:12996/?token=...
+node .sandbox/e2e-settings-page.mjs http://127.0.0.1:12996/?token=...
+# E2E_CHROMIUM=/path/to/chrome.exe node .sandbox/e2e/e2e.mjs <url>   # any recent Chromium
 ```
 
-It needs a running DSH with the plugin installed, at least one session **with a
-title**, and one parked note (use the `suspend_session` tool, or `POST
-/session-suspend/set`). A session still called "新会话" / "New session" has no
-title to match on, so its row stays unpainted — that is the documented
-limitation, not a failure.
+Both new e2e scripts are **self-contained**: with nothing parked they open a
+session and park one with `/suspend` themselves, so no manual preparation is
+needed. The selectors were learned from the real DOM and are worth recording:
+the official Settings navigation is the only `<nav>` that also lists a built-in
+section (通用设置) — the sidebar footer button carries the same label as our nav
+entry, so an unscoped text search clicks the wrong element; the composer is a
+`contenteditable`, not a `textarea`; command results are **flow nodes in the
+session timeline**, and the greeting screen mounts no timeline, so a session with
+history must be opened first; and in 0.1.6 the plugin manager no longer uses
+`code[data-plugin-name]` — each plugin is a card whose title is a button.
 
 ### Are the tools visible to the model?
 
@@ -421,9 +484,20 @@ to a human.
 > Pitfall 1 — `inject` listed a service this plugin's fiber cannot reach
 > (`uiWorkspace` is provided by `dsh-client-ui-workspace`'s own fiber, a sibling
 > rather than an ancestor). cordis waits for it forever, so the plugin never
-> activates (the GUI reports "1 entry did not activate"). Keep `inject` to
-> `['slots']` and read services opportunistically at the call site with
-> fallbacks.
+> activates (the GUI reports "1 entry did not activate"). Keep `inject` to the
+> genuinely reachable `['slots', 'locale']` (both registered at root scope by
+> bundles dsh-base itself composes) and read other services opportunistically at
+> the call site with fallbacks.
+>
+> Pitfall 5 — the runner's `ctx` is **fail-loud**: reading a service that is not
+> listed in `inject` throws `cannot get property "locale" without inject`, and it
+> throws inside `apply()`, killing the whole plugin tree on the spot (measured in
+> v0.1.5's first cut). A permissive fake ctx would have hidden this forever — the
+> service simply sat on the object, so the read silently returned undefined — so
+> `.sandbox/client-harness.cjs`'s fake ctx is now a strict Proxy: only the
+> declared `inject` services and cordis's own built-ins resolve, everything else
+> throws. The matching broken variant (dropping `locale` from `inject`) must be
+> rejected by the gate.
 >
 > Pitfall 2 — `noteByTitle()` once returned `{sessionId, entry}` while its
 > consumer `presetFor()` reads `note.presetId`; the field was nested away and

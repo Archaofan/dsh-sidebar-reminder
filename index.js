@@ -3,6 +3,8 @@
  *
  * Parks a session with a natural-language reminder note:
  *   - three model tools (suspend_session / resume_session / list_suspended),
+ *   - three slash commands (suspend / suspended / resume) — the same
+ *     operations without spending a model round,
  *   - three same-origin HTTP routes the browser half polls and mutates,
  *   - one JSON file under the DSH home storages directory (atomic write).
  *
@@ -19,8 +21,14 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 
 /** Cordis function-plugin name. */
 export const name = 'session-suspend'
-/** Services required before this plugin loads. */
-export const inject = ['agents', 'tools']
+/**
+ * Services required before this plugin loads.
+ *
+ * `commands` sits in the same dsh-base layer as `tools` (dsh-base's patch
+ * composes @deepseek-ai/dsh-commands right next to @deepseek-ai/dsh-tools),
+ * so any composition that can run the tools can run the slash commands too.
+ */
+export const inject = ['agents', 'tools', 'commands']
 
 /** Stable identity used for the storage directory and the HTTP route prefix. */
 const PLUGIN_ID = 'session-suspend'
@@ -33,6 +41,8 @@ const MAX_BODY_BYTES = 64 * 1024
 
 /** The three tool names this plugin owns (used by logs only). */
 const TOOL_NAMES = ['suspend_session', 'resume_session', 'list_suspended']
+/** The three slash-command names this plugin owns (used by logs only). */
+const COMMAND_NAMES = ['suspend', 'suspended', 'resume']
 
 /* ------------------------------------------------------------------ *
  * Durable storage: one JSON file, atomic replace, in-memory mirror.
@@ -485,6 +495,28 @@ const LIST_DESCRIPTION = [
   'Triggers in either language: "我还有哪些事没做完" / "列出挂起的会话" / "what is still parked?" / "list my suspended sessions".',
 ].join(' ')
 
+/* Slash-command descriptions, same bilingual style as the tool ones: the
+ * discovery UI shows them verbatim, and the trigger phrases double as the
+ * documentation of when each command applies. */
+const SUSPEND_COMMAND_DESCRIPTION = [
+  'Park the current session with a reminder note — usage: /suspend <note>.',
+  'The same operation as the suspend_session tool, without spending a model round.',
+  'Triggers in either language: "先挂起，晚点再继续" / "挂起：等对方回复后再继续" /',
+  '"park this, remind me later" / "hold this until the build finishes".',
+].join(' ')
+
+const SUSPENDED_COMMAND_DESCRIPTION = [
+  'List every parked session with its reminder note, newest first — usage: /suspended.',
+  'The same listing as the list_suspended tool, without spending a model round.',
+  'Triggers in either language: "我还有哪些事没做完" / "列出挂起的会话" / "what is still parked?" / "list my suspended sessions".',
+].join(' ')
+
+const RESUME_COMMAND_DESCRIPTION = [
+  'Remove the park note from the current session — usage: /resume.',
+  'The same operation as the resume_session tool, without spending a model round.',
+  'Triggers in either language: "取消挂起" / "这事结了，不用提醒了" / "done, unpark" / "clear the reminder".',
+].join(' ')
+
 /** Shared output shape for the two mutating tools. */
 const MUTATION_OUTPUT = {
   schema: {
@@ -704,6 +736,126 @@ async function resolveTargetSession(ctx, exec, requested) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Slash commands.
+ *
+ * The same three operations as the tools, typed by hand instead of asked
+ * for in prose. A command never enters the model history: the registry
+ * logs `command/run` / `command/done` and the dispatching composer renders
+ * the returned text directly, so /suspend costs one line of UI feedback
+ * instead of a full model round.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Register one slash command, tolerating a double mount or a name another
+ * plugin already owns: the registry throws on a duplicate name, and two
+ * mounts of this plugin would otherwise fail the whole plugin tree at boot.
+ * A duplicate means the name is taken, so this instance stands down instead
+ * of crashing the boot.
+ */
+function registerCommand(ctx, definition, log) {
+  try {
+    return ctx.commands.register(definition)
+  } catch (error) {
+    const message = describeError(error)
+    if (!/already|duplicate|registered/i.test(message)) throw error
+    log?.warn(`command /${definition.name} is already registered by another instance; standing down`)
+    return () => {}
+  }
+}
+
+function registerCommands(ctx) {
+  const log = ctx.logger(PLUGIN_ID)
+  const disposers = []
+
+  disposers.push(
+    registerCommand(
+      ctx,
+      {
+        name: 'suspend',
+        description: SUSPEND_COMMAND_DESCRIPTION,
+        input: { hint: '提醒内容，例如：等对方回复后再继续……' },
+        async handler(invocation) {
+          const note = normalizeNote(invocation.rawInput)
+          if (!note) {
+            return { kind: 'error', text: 'Usage: /suspend <reminder note> · 用法：/suspend <提醒内容>' }
+          }
+          const target = await resolveTargetSession(ctx, invocation, '')
+          if (target.error) {
+            return { kind: 'error', text: `Cannot resolve the current session (${target.error}).` }
+          }
+          await loadPresets()
+          const presetId = resolvePresetId('')
+          const { replaced } = await mutate((current) => {
+            const wasParked = current.has(target.sessionId)
+            current.set(target.sessionId, { note, createdAt: new Date().toISOString(), presetId })
+            return { replaced: wasParked }
+          })
+          return {
+            kind: 'success',
+            text:
+              `Parked: ${note}\n` +
+              `Session ${target.sessionId}${replaced ? ' (note replaced)' : ''} — ${notes.size} parked in total.`,
+          }
+        },
+      },
+      log,
+    ),
+  )
+
+  disposers.push(
+    registerCommand(
+      ctx,
+      {
+        name: 'suspended',
+        description: SUSPENDED_COMMAND_DESCRIPTION,
+        async handler() {
+          await loadNotes()
+          const sessions = [...notes.entries()]
+            .map(([sessionId, entry]) => ({ sessionId, note: entry.note, createdAt: entry.createdAt }))
+            .sort((left, right) => (right.createdAt || '').localeCompare(left.createdAt || ''))
+          if (sessions.length === 0) return { kind: 'success', text: 'No sessions are parked.' }
+          return {
+            kind: 'success',
+            text:
+              `${sessions.length} parked session(s):\n` +
+              sessions.map((entry) => `- ${entry.sessionId}: ${entry.note} (parked ${entry.createdAt})`).join('\n'),
+          }
+        },
+      },
+      log,
+    ),
+  )
+
+  disposers.push(
+    registerCommand(
+      ctx,
+      {
+        name: 'resume',
+        description: RESUME_COMMAND_DESCRIPTION,
+        async handler(invocation) {
+          const target = await resolveTargetSession(ctx, invocation, '')
+          if (target.error) {
+            return { kind: 'error', text: `Cannot resolve the current session (${target.error}).` }
+          }
+          const removed = await mutate((current) => current.delete(target.sessionId))
+          return {
+            kind: 'success',
+            text: removed
+              ? `Unparked session ${target.sessionId} — ${notes.size} parked in total.`
+              : `Session ${target.sessionId} was not parked.`,
+          }
+        },
+      },
+      log,
+    ),
+  )
+
+  return () => {
+    for (const dispose of disposers.reverse()) dispose()
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Plugin entry.
  * ------------------------------------------------------------------ */
 
@@ -723,9 +875,13 @@ export function apply(ctx) {
   const log = ctx.logger(PLUGIN_ID)
 
   ctx.effect(() => {
-    const dispose = registerTools(ctx)
-    log.info(`tools registered: ${TOOL_NAMES.join(', ')}`)
-    return dispose
+    const disposeTools = registerTools(ctx)
+    const disposeCommands = registerCommands(ctx)
+    log.info(`tools registered: ${TOOL_NAMES.join(', ')}; commands: /${COMMAND_NAMES.join(' /')}`)
+    return () => {
+      disposeCommands()
+      disposeTools()
+    }
   }, `session-suspend.tools(${seq})`)
 
   // The webServer is absent in non-web compositions; registerRoutes then never runs.

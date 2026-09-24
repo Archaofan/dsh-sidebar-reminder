@@ -18,6 +18,8 @@ DSH 网页版的「会话挂起提醒」插件：在对话里用自然语言描�
 | 悬停任意会话行 | 官方「…」旁出现图钉按钮，点它直接给**该会话**写提醒 |
 | **折叠的工作区** | 折叠时在该行右侧显示一个数字，表示这个工作区里有几个会话被挂起；展开后数字消失（因为会话都在眼前，再显示就是冗余） |
 | 挂起列表 | 每一行按它自己的**样式预设**渲染，和左侧会话栏同一个样子；挂起时间带一个浅色小框，不再和背景糊在一起 |
+| **官方设置页** | 「设置」左侧导航里多一项「挂起提醒」，和面板齿轮打开的是**同一份**偏好编辑器 |
+| **斜杠命令** | 在输入框里 `/suspend 备注`、`/suspended`、`/resume`，不花模型轮次 |
 
 > 悬停提醒的位置是**可配置**的（官方卡片右侧 / 官方卡片左下），而且画定之后不会再移动
 > （见下面「悬停框定位」）。
@@ -26,7 +28,12 @@ DSH 网页版的「会话挂起提醒」插件：在对话里用自然语言描�
 
 ## 样式预设
 
-左下角面板 → 齿轮 → 「样式设置」：
+偏好编辑器有两个入口，内容完全一致（同一份 `presets.json`，改任何一处立即生效）：
+
+- 左下角面板 → 齿轮 → 「样式设置」
+- **官方设置页**：「设置」左侧导航 → 「挂起提醒」（DSH 自己的 Settings 窗口，不用先展开侧边栏面板）
+
+编辑器内容：
 
 - **挂起时选择样式**（总开关，默认打开）：打开后每次挂起都弹下拉框让你选预设；关闭则直接用默认预设。
 - **预设列表**：名称 / 样式 / 颜色 / 浓度（5%–100%），可新增、编辑、删除，最多 12 个。
@@ -81,6 +88,19 @@ DSH 网页版的「会话挂起提醒」插件：在对话里用自然语言描�
 `resume_session` 清除；问「我还有哪些事没做完 / what is still parked?」会调用
 `list_suspended` 列出全部挂起。
 
+### 斜杠命令（不花模型轮次）
+
+在输入框里直接打斜杠，DSH 的指令发现面板会列出本插件注册的三条：
+
+| 命令 | 作用 |
+| --- | --- |
+| `/suspend <备注>` | 挂起**当前会话**；备注为空时给出用法提示 |
+| `/suspended` | 列出全部挂起（备注 + 时间，新的在前），和 `list_suspended` 工具同一份数据 |
+| `/resume` | 取消挂起当前会话；本来没挂起时如实告知 |
+
+结果以流程节点形式落在当前会话的时间线里（官方对所有命令一视同仁），
+侧边栏的高亮 / 角标 / 折叠计数同步更新。
+
 ### 手动
 
 点会话页头部的「挂起备注」按钮，填写提醒内容保存即可（`Ctrl/Cmd + Enter` 快速保存）。
@@ -95,11 +115,11 @@ DSH 网页版的「会话挂起提醒」插件：在对话里用自然语言描�
 ### 方式 A：打包安装（推荐，自包含）
 
 ```bash
-# 在插件目录打包（只含 6 个交付文件，见 package.json 的 files）
+# 在插件目录打包（只含 7 个交付文件，见 package.json 的 files）
 pnpm pack --pack-destination .
 
 # 装进生产 profile
-dsh plugin --profile web add E:\DSH-Workspace\DSH-Plugin\dsh-session-suspend-0.1.2.tgz --ignore-scripts
+dsh plugin --profile web add E:\DSH-Workspace\DSH-Plugin\dsh-session-suspend-0.1.5.tgz --ignore-scripts
 ```
 
 自包含：装完后即使插件目录被移动/删除也不影响生产；升级时重新打包再 `add` 一次即可。
@@ -148,14 +168,15 @@ DSH 起不来**。本插件在 host 侧对工具和路由注册都做了运行�
 ## 工作原理
 
 ```
-index.js   host 半边：3 个模型工具 + 3 个本地 HTTP 路由 + JSON 持久化
-client.js  浏览器半边：轮询 / 面板 / 角标 / 行高亮 / 悬停 tooltip（单文件，无构建）
+index.js   host 半边：3 个模型工具 + 3 条斜杠命令 + 3 个本地 HTTP 路由 + JSON 持久化
+client.js  浏览器半边：轮询 / 面板 / 角标 / 行高亮 / 悬停 tooltip / 官方设置页分区（单文件，无构建）
 ```
 
 - **存储**：`~/.dsh/storages/session-suspend/suspended.json`（`{ 会话id: { note, createdAt } }`，临时文件 + 原子重命名写入）。
 - **数据流**：浏览器每 2.5s 轮询 `GET /session-suspend/list`；保存 / 清除走 `POST /session-suspend/set|clear`。host 是唯一事实源。
 - **模型工具**：`suspend_session` / `resume_session` / `list_suspended`，按 DSH 官方 `defineTool` 约定注册；只允许主会话（root agent）挂起自己的会话。
-- **UI**：全部使用官方插槽（`sidebar.footer.action`、`sidebar.toggle.badge`、`conversation.session.header.actions`），不 shadow 任何官方组件。
+- **斜杠命令**：`/suspend` / `/suspended` / `/resume`，按 `ctx.commands.register` 约定注册（名字必须全小写），与工具共用同一套存储与解析逻辑，只是少一次模型往返。
+- **UI**：全部使用官方插槽（`sidebar.footer.action`、`conversation.session.header.actions`、`settings.section`），不 shadow 任何官方组件。
 - **行高亮**：官方会话行没有按行插槽，且只读内置 `schedule` projection，因此与社区插件（dsh-activity-bell 等）一致，采用 DOM 增强：给匹配标题的 `[role="treeitem"]` 行写入 `data-dsh-suspend` 属性 + 高亮 class，React 重渲染后由 MutationObserver + 定时扫描补写。
 
 ## 悬停框定位
@@ -188,9 +209,9 @@ client.js  浏览器半边：轮询 / 面板 / 角标 / 行高亮 / 悬停 toolt
   高亮可能失效（此时面板、角标、工具均不受影响）。
 - **HTTP 路由无鉴权**：与社区插件一致，仅监听本机回环，同机其他进程可读写该文件。
 - 每个会话只保存一条提醒（再次挂起即覆盖）；归档会话的提醒会保留到手动清除。
-- 浏览器语言按 `document.documentElement.lang` 取，只内置了中 / 英两种文案。
-- 预设存在插件自己的 `presets.json`，没有接进 DSH 官方设置页（要接需引入
-  `ctx.settings` / `settings.section` 等依赖，见「扩展方向」）。
+- 界面文案内置中 / 英两种。启动时按文档语言取一份，随后**跟随 DSH 的界面语言**：
+  在设置里切换语言，侧边栏、面板、官方设置页当场跟着变，不用刷新页面
+  （没有 locale 服务的组合里退化为文档语言）。
 - 「打开」会话走 `uiWorkspace.openSession`（DSH 侧边栏自己也是这么点的），失败时退化为
   点击侧边栏里对应行，再失败会在面板里给出文字提示。
 - 行内按钮取 session id 优先读 React fiber，读不到时退回标题匹配。
@@ -218,22 +239,26 @@ node --check index.js && node --check client.js
 
 # 1. 打包并装进沙箱 profile（自包含，依赖随包走）
 $env:DSH_HOME = 'E:\DSH-Workspace\DSH-Plugin\.sandbox\home'
-& .sandbox\node_modules\.bin\pnpm.cmd pack --pack-destination .sandbox
+npm pack --ignore-scripts            # 产物 dsh-session-suspend-<version>.tgz
 node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox remove dsh-session-suspend
-node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add .sandbox\dsh-session-suspend-0.1.2.tgz --ignore-scripts
+node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js plugin --profile sandbox add .sandbox\dsh-session-suspend-0.1.5.tgz --ignore-scripts
 
-# 2. 引导沙箱（独立端口 12991、仅回环、独立 home，绝不碰生产）
-node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js --profile sandbox --no-open --port 12991 --host 127.0.0.1
+# 2. 引导沙箱（独立端口 12996、仅回环、独立 home，绝不碰生产）
+node .sandbox\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js --profile sandbox --no-open --port 12996 --host 127.0.0.1
 
 # 3. 校验（另开终端）
-curl http://127.0.0.1:12991/session-suspend/list                                  # host 路由
-curl -X POST http://127.0.0.1:12991/session-suspend/set -H "content-type: application/json" -d '{\"sessionId\":\"t\",\"note\":\"n\"}'
-# 浏览器打开引导日志里打印的 http://127.0.0.1:12991/?token=... 看 UI
+curl "http://127.0.0.1:12996/session-suspend/list?token=<引导日志里的token>"
+curl -X POST "http://127.0.0.1:12996/session-suspend/set?token=<token>" -H "content-type: application/json" -d '{\"sessionId\":\"t\",\"note\":\"n\"}'
+# 浏览器打开引导日志里打印的 http://127.0.0.1:12996/?token=... 看 UI
 ```
 
-> 端口被占用时用 `netstat -ano | Select-String '12991'` 找 PID（`Get-NetTCPConnection`
+> 端口被占用时用 `netstat -ano | Select-String '12996'` 找 PID（`Get-NetTCPConnection`
 > 在本机不可靠），只杀沙箱那个进程——**生产监听 12931，绝不能碰**。
 > （注意生产绑定的是 `0.0.0.0:12931`，grep 时别写成 `127.0.0.1:12931`，否则会误判成没在跑。）
+>
+> `npm pack` 默认缓存不可写时报权限错，指向沙箱自带缓存即可：
+> `$env:npm_config_cache = 'E:\DSH-Workspace\DSH-Plugin\.sandbox\.npm-cache'`。
+> Windows 上 `npm.ps1` 可能被执行策略拦掉，用 `npm.cmd` 调用。
 
 > ⚠️ **交互验证必须由你本人在普通 PowerShell 终端里启动沙箱**，不要让 AI 助手代启。
 > 官方的工作区目录选择器是原生 Win32 对话框，由宿主进程用带管道的 `child_process.spawn`
@@ -242,7 +267,8 @@ curl -X POST http://127.0.0.1:12991/session-suspend/set -H "content-type: applic
 > 推荐把工作区选到 `.sandbox\workspace`（一次性目录，随便改）。
 
 已验证通过：boot 图组合、host 四个路由与持久化（list / set / clear / presets，含 400/413
-状态码与预设校验）、client bundle 被组合下发、三个插槽注册、tarball 安装路径、重复挂载的
+状态码与预设校验）、client bundle 被组合下发、三个插槽注册、官方设置页分区与斜杠命令的
+真实浏览器验证、tarball 安装路径、重复挂载的
 运行时守卫、以及「缺依赖 / 端口占用」导致 boot 失败的反面案例（都是沙箱拦下的，没到生产）。
 沙箱与生产完全隔离（独立 home / profile / 端口），可随时整个删掉。
 
@@ -306,43 +332,65 @@ node .sandbox/client-harness.cjs <已安装的client.js>  # 对安装产物跑
 HARNESS_LANG=en node .sandbox/client-harness.cjs client.js  # 同一套检查，英文界面
 ```
 
-它检查八件事：模块作用期不抛异常、`apply()` 能跑完且三个插槽都注册成功、
-`inject` 里只列真正可达的服务、**绘制链**（备注里存的 `presetId` 确实决定了
+它检查十件事：模块作用期不抛异常、`apply()` 能跑完且三个插槽都注册成功、
+`inject` 里只列真正可达的服务（且模块读到的服务都在里面——见踩过的坑五）、
+**绘制链**（备注里存的 `presetId` 确实决定了
 行上的样式类，而不是永远回退到默认预设）、**预设名本地化**（内置预设按界面
 语言显示，改过名的那个以你填的名字为准）、**悬停框定位**（两种配置位置都离开
 侧边栏、都不盖官方卡片，且画定之后不再移动）、**等待行为**（`below` 位置会等官方
-卡片布局好再画，而不是先画再校正造成可见跳动），以及**时序对齐**（开 500ms /
+卡片布局好再画，而不是先画再校正造成可见跳动）、**时序对齐**（开 500ms /
 关 200ms，与官方 `HoverCard` 的 `openDelayMs = 500` 和 `usePointerGrace` 的
-200ms 完全一致）。
+200ms 完全一致）、**语言字典与热切换**（zh/en 两本都发布到 `ctx.locale`，
+激活时跟随框架语言而非文档语言，切换语言后字典与 store 一起刷新），以及
+**官方设置页分区**（`settings.section` 注册成功、导航标签是会跟随语言的 thunk、
+组件能渲染）。
 
 `.sandbox/tool-schema.cjs` 是 host 半边的对应门禁：注册真实工具、逐个调用，
 递归核对返回值里每个字段是否已在输出 schema 中声明（`additionalProperties:
-false` 时未声明即违规，见下面踩过的坑四）。
+false` 时未声明即违规，见下面踩过的坑四）；三条斜杠命令也会被逐个自测
+（名字必须全小写、返回值必须是 `{kind:'success'|'error'}`）。
 
-`.sandbox/gate.cjs` 是总回归门禁，两个半边各跑好版本 + 坏版本：客户端七个坏版本
-（`inject` 含不可达的服务；`noteByTitle` 形状不匹配；悬停框挂回侧边栏；`below`
+`.sandbox/gate.cjs` 是总回归门禁，两个半边各跑好版本 + 坏版本：客户端十个坏版本
+（`inject` 含不可达的服务；读了 `ctx.locale` 却没把它列进 `inject`；
+`noteByTitle` 形状不匹配；悬停框挂回侧边栏；`below`
 位置瞎猜官方卡片高度；`showTipWhenReady` 不再等待；开延迟偏离 500；关宽限偏离
-200），host 一个坏版本（`suspend_session` 返回未声明的 `presetId`），确认全部被拒
-（exit 1），同时两个好版本通过（exit 0）。
+200；语言切换不重绑字典；设置页导航标签写成了静态字符串），host 三个坏版本
+（`suspend_session` 返回未声明的 `presetId`；`/suspend` 忽略 rawInput；
+命令名大小写不合规），确认全部被拒
+（exit 1），同时四个好版本通过（exit 0：中文、英文、以及「文档是英文但框架
+语言是中文」的错配组合——证明插件跟随框架语言）。
 
-`e2e/client.mjs` 是最后一公里：用 Playwright 驱动**真实 GUI**，插槽注册表、React
-渲染、官方 `HoverCard` 全部是真的。它打开引导日志里打印的 token URL，然后检查
-插件的页脚按钮渲染出来了、没有 "did not activate" 报错、挂起的行真的带上了高亮
-属性，以及——假 DOM 无论如何测不到的那部分——悬停一行时我们的卡片**位于官方卡片
-左下且不重叠**、**画定之后不再移动**、操作按钮在卡片自己的边框内、且**不横跨在
-侧边栏上方**，还有切换定位方式后卡片真的会动并写回 host：
+浏览器半边有三个 e2e，全部用 Playwright 驱动**真实 GUI**，插槽注册表、React
+渲染、官方 `HoverCard`、官方设置窗口、指令发现面板全部是真的：
+
+- `.sandbox/e2e/e2e.mjs`——插件的页脚按钮渲染出来了、没有 "did not activate"
+  报错、挂起的行真的带上了高亮属性，以及——假 DOM 无论如何测不到的那部分——
+  悬停一行时我们的卡片**位于官方卡片左下且不重叠**、**画定之后不再移动**、
+  操作按钮在卡片自己的边框内、且**不横跨在侧边栏上方**，还有切换定位方式后
+  卡片真的会动并写回 host。
+- `.sandbox/e2e/e2e-new-surfaces.mjs`——官方设置页里我们的分区渲染出标题 /
+  开关 / 预设列表，勾选「挂起时选择样式」后 host 侧的偏好真的翻转；再在真实
+  会话里依次打 `/suspend`、`/suspended`、`/resume`，挂起、列表、清除都在
+  时间线里看得到。
+- `.sandbox/e2e-settings-page.mjs`——插件管理页里我们的卡片显示 v0.1.5、
+  包名、中文优先的描述，且组件状态是「运行中」（这是唯一按插件报告激活状态的地方）。
 
 ```bash
 pnpm install                      # 装一次，拿 playwright 开发依赖
-pnpm run e2e http://127.0.0.1:12996/?token=...   # 用沙箱引导日志里的地址
-# E2E_CHROMIUM=/path/to/chrome.exe pnpm run e2e <url>   # 任意较新的 Chromium 都行
-# E2E_SHOTS=<dir> pnpm run e2e <url>                    # 顺带存截图
+node .sandbox/e2e/e2e.mjs http://127.0.0.1:12996/?token=...              # 用沙箱引导日志里的地址
+node .sandbox/e2e/e2e-new-surfaces.mjs http://127.0.0.1:12996/?token=...
+node .sandbox/e2e-settings-page.mjs http://127.0.0.1:12996/?token=...
+# E2E_CHROMIUM=/path/to/chrome.exe node .sandbox/e2e/e2e.mjs <url>   # 任意较新的 Chromium 都行
 ```
 
-它需要一个已装好插件并在运行中的 DSH、至少一个**有标题的**会话、以及一条挂起的
-备注（用 `suspend_session` 工具，或 `POST /session-suspend/set`）。还叫「新会话 /
-New session」的会话没有可匹配的标题，它的行不会被画上高亮——这是上面写明的已知
-限制，不是失败。
+两个新 e2e 都是**自包含**的：没有挂起会话时它会自己打开一个会话并用
+`/suspend` 挂一个，不再需要人工预先准备数据。选择器都是从真实 DOM 上学来的，
+值得记一笔：官方设置窗口的导航是唯一同时列出内置分区（「通用设置」）的
+`<nav>`——侧边栏底部按钮和我们的导航项文案一样，不限空间的文本搜索会点错；
+输入框是 `contenteditable` 而不是 `textarea`；命令结果是**会话时间线里的
+流程节点**，问候屏没挂时间线，所以要先打开一个有历史的会话；
+插件管理页在 0.1.6 里不再是 `code[data-plugin-name]`，而是卡片里一个
+按钮形式的标题。
 
 ### 工具对模型是否可见
 
@@ -367,7 +415,15 @@ ctx.tools.wireSchemas().schemas   ["suspend_session", "resume_session", "list_su
 > 踩过的坑一：`inject` 里列了本插件 fiber 不可达的服务（`uiWorkspace` 是由
 > `dsh-client-ui-workspace` 自己的 fiber 提供的，和本插件是兄弟而非父子关系），
 > cordis 会一直等它，插件于是永不激活（GUI 报 "1 entry did not activate"）。
-> `inject` 只写 `['slots']`，需要服务时在调用点 opportunistic 读取并做好兜底。
+> `inject` 只写真正可达的 `['slots', 'locale']`（两者都是 dsh-base 组合在根
+> 作用域注册的），需要其他服务时在调用点 opportunistic 读取并做好兜底。
+>
+> 踩过的坑五（v0.1.5 实测）：runner 的 `ctx` 是**fail-loud** 的——读一个没有
+> 列进 `inject` 的服务会直接抛 `cannot get property "locale" without inject`，
+> 而且抛在 `apply()` 里，整个插件树当场暴毙。假 ctx 如果直接返回 undefined
+> 就把这类 bug 永远藏住了，所以 `.sandbox/client-harness.cjs` 的假 ctx 现在是
+> 一个严格代理：只有 `inject` 声明过的服务和 cordis 内置项解析，其余一律抛错。
+> 对应坏版本（删掉 `inject` 里的 `locale`）必须被 gate 拒掉。
 >
 > 踩过的坑二：`noteByTitle()` 一度返回 `{sessionId, entry}`，而消费方 `presetFor()`
 > 读的是 `note.presetId`——字段被嵌在里面从来没被读到，于是每一行都静默回退到默认

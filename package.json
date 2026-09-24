@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-suspend",
-  "version": "0.1.4",
-  "description": "会话挂起提醒：对话里自然语言挂起会话，侧边栏高亮并悬停显示提醒；折叠的工作区显示挂起数量。Park sessions with a natural-language note.",
+  "version": "0.1.5",
+  "description": "会话挂起提醒：对话里自然语言挂起会话，侧边栏高亮并悬停显示提醒；折叠的工作区显示挂起数量；偏好接入 DSH 官方设置页，支持 /suspend /suspended /resume 斜杠命令。Park sessions with a natural-language note.",
   "type": "module",
   "main": "index.js",
   "files": [
@@ -58,7 +58,11 @@
   "scripts": {
     "check": "node --check index.js && node --check client.js",
     "gate": "node .sandbox/gate.cjs",
-    "e2e": "node e2e/client.mjs"
+    "tools": "node .sandbox/tool-schema.cjs index.js",
+    "client": "node .sandbox/client-harness.cjs client.js",
+    "e2e": "node .sandbox/e2e/e2e.mjs",
+    "e2e:new": "node .sandbox/e2e/e2e-new-surfaces.mjs",
+    "e2e:page": "node .sandbox/e2e-settings-page.mjs"
   },
   "devDependencies": {
     "playwright": "^1.63.0"
