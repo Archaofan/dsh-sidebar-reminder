@@ -121,7 +121,7 @@ DSH 网页版的「会话挂起提醒」插件：在对话里用自然语言描�
 pnpm pack --pack-destination .
 
 # 装进生产 profile
-dsh plugin --profile web add dsh-session-suspend-0.2.3.tgz --ignore-scripts
+dsh plugin --profile web add dsh-session-suspend-0.2.5.tgz --ignore-scripts
 ```
 
 文件名里的版本号跟当前 release 走——照抄这里写的那个不如去
@@ -129,7 +129,7 @@ dsh plugin --profile web add dsh-session-suspend-0.2.3.tgz --ignore-scripts
 这种写死的版本号正是发完新版就开始骗人的东西。不想本地打包的话，等价的一行：
 
 ```bash
-dsh plugin --profile web add https://github.com/Archaofan/dsh-sidebar-reminder/releases/download/v0.2.3/dsh-session-suspend-0.2.3.tgz
+dsh plugin --profile web add https://github.com/Archaofan/dsh-sidebar-reminder/releases/download/v0.2.5/dsh-session-suspend-0.2.5.tgz
 ```
 
 自包含：装完后即使插件目录被移动/删除也不影响生产；升级时重新打包再 `add` 一次即可。

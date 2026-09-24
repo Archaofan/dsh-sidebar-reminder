@@ -154,7 +154,7 @@ not touch the profile's dependency tree.
 pnpm pack --pack-destination .
 
 # install into the production profile
-dsh plugin --profile web add dsh-session-suspend-0.2.3.tgz --ignore-scripts
+dsh plugin --profile web add dsh-session-suspend-0.2.5.tgz --ignore-scripts
 ```
 
 The version in the filename tracks the current release — check the
@@ -163,7 +163,7 @@ than copying the one written here, which is the sort of thing that goes stale th
 moment a release ships. The equivalent one-liner, which needs no local pack:
 
 ```bash
-dsh plugin --profile web add https://github.com/Archaofan/dsh-sidebar-reminder/releases/download/v0.2.3/dsh-session-suspend-0.2.3.tgz
+dsh plugin --profile web add https://github.com/Archaofan/dsh-sidebar-reminder/releases/download/v0.2.5/dsh-session-suspend-0.2.5.tgz
 ```
 
 Self-contained: once installed, moving or deleting the plugin directory does not
