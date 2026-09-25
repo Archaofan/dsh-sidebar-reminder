@@ -182,6 +182,36 @@ version as the harness.
 > nothing but the plugin. This plugin itself declares no install scripts, so
 > nothing is lost by skipping them.
 
+### If the second install fails with `ERR_PNPM_MISSING_TARBALL_INTEGRITY`
+
+A pnpm bug, not a plugin one, reproducible in plain `pnpm` with no DSH involved:
+
+```bash
+$ pnpm add https://github.com/Archaofan/dsh-sidebar-reminder/releases/download/v0.2.5/dsh-session-suspend-0.2.5.tgz
+# ok, but the lockfile records `resolution: {tarball: ...}` with NO integrity
+$ pnpm add <any-other-package>
+ERR_PNPM_MISSING_TARBALL_INTEGRITY  Cannot install package "dsh-session-suspend@...":
+its lockfile entry has no "integrity" field, so pnpm cannot verify the tarball.
+```
+
+When pnpm serves a tarball from its content-addressable store instead of
+downloading it, the lockfile entry it writes carries no integrity field. The
+install that caused it succeeds; the **next** install in that profile then
+refuses to run. **The first install always works**, so this only bites when you
+add a second plugin to a profile that already has one.
+
+To clear it, delete both files — deleting only the lockfile does **not** work,
+because pnpm regenerates it from `package.json` and the store is still warm:
+
+```bash
+# <DSH_HOME>/profiles/<profile>/
+rm -rf node_modules pnpm-lock.yaml
+dsh plugin --profile web add dsh-session-suspend-0.2.5.tgz --ignore-scripts
+```
+
+`pnpm store prune`, `pnpm add --force` and a cold `--store-dir` were all tested;
+none clear it while `node_modules` still holds the package.
+
 ### B. Directory link (for iterating)
 
 ```bash
@@ -592,6 +622,18 @@ to a human.
 > by `.sandbox/tool-schema.cjs`. Note that `required: true` inside a property is
 > DSH's convention (`dsh-tools` promotes it into a standard `required: [...]`
 > array) — do not rewrite it into plain JSON Schema style.
+
+## Development
+
+```bash
+node --check index.js && node --check client.js   # syntax self-check
+```
+
+No dependencies need installing; the host half's `@deepseek-ai/*` references
+resolve from the DSH install directory — the same approach as the official
+`dsh-workspace-kit` and friends. Everything else about developing against a real
+sandbox is under [Development and sandbox verification](#development-and-sandbox-verification)
+above, including why the browser half needs its own harness.
 
 ## Release checklist
 

@@ -143,6 +143,35 @@ dsh plugin --profile web add https://github.com/Archaofan/dsh-sidebar-reminder/r
 > 加上 `--ignore-scripts` 后同一次安装约 3 秒完成，且除了插件本身什么都不碰。
 > 本插件自己不声明任何安装脚本，所以跳过它们没有任何损失。
 
+### 如果第二次安装报 `ERR_PNPM_MISSING_TARBALL_INTEGRITY`
+
+这是 pnpm 的 bug，不是插件的问题，在完全不涉及 DSH 的纯 `pnpm` 里就能复现：
+
+```bash
+$ pnpm add https://github.com/Archaofan/dsh-sidebar-reminder/releases/download/v0.2.5/dsh-session-suspend-0.2.5.tgz
+# 成功，但 lockfile 里写的是 `resolution: {tarball: ...}`，没有 integrity 字段
+$ pnpm add <随便另一个包>
+ERR_PNPM_MISSING_TARBALL_INTEGRITY  Cannot install package "dsh-session-suspend@...":
+its lockfile entry has no "integrity" field, so pnpm cannot verify the tarball.
+```
+
+pnpm 从内容寻址的 store 里直接取 tarball（而不是重新下载）时，写进 lockfile 的
+条目会缺 integrity 字段。触发它的那次安装是成功的；**同一 profile 里的下一次
+安装**才会被拒绝。**第一次安装总是成功的**，所以这只在"往已经装了一个插件的
+profile 里再装一个"时才咬人。
+
+清掉它要同时删两个文件——只删 lockfile **没用**，pnpm 会从 `package.json` 重新
+生成，而 store 还是热的：
+
+```bash
+# <DSH_HOME>/profiles/<profile>/
+rm -rf node_modules pnpm-lock.yaml
+dsh plugin --profile web add dsh-session-suspend-0.2.5.tgz --ignore-scripts
+```
+
+`pnpm store prune`、`pnpm add --force`、以及换一个冷的 `--store-dir` 都测过，
+只要 `node_modules` 里还留着那个包，没有一个能清掉它。
+
 ### 方式 B：目录联接（开发迭代用）
 
 ```bash
